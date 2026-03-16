@@ -323,7 +323,7 @@ def compute_entries_with_team_available(team, day_idx, pick_counts, total_entrie
 def compute_opp_pct_model(avail, rd_idx, total_rds, pick_counts, current_day, total_entries):
     """
     Hybrid model: use actual pick data if available for current day,
-    otherwise fall back to the seed/brand model for future days.
+    otherwise fall back to realistic survivor pool modeling.
     """
     if not avail: return {}
 
@@ -338,22 +338,62 @@ def compute_opp_pct_model(avail, rd_idx, total_rds, pick_counts, current_day, to
             result[t["team"]] = cnt / max(total_picks, 1)
         return result
 
-    # Fallback: modeled behavior
+    # ── Realistic modeled behavior ──
+    # Key insight: in a survivor pool, NOBODY picks heavy underdogs in early
+    # rounds when all teams are available. Picks concentrate heavily on
+    # mid-tier favorites (3-7 seeds) with some on 1-2 seeds from impatient players.
+    #
+    # Teams below ~45% win probability get essentially zero picks.
+
     BRAND = {"Duke","Kansas","UConn","Michigan","Florida","Arizona","Kentucky","North Carolina",
              "Gonzaga","Houston","Purdue","Michigan State","Alabama","Iowa State","Illinois",
-             "Arkansas","Virginia","UCLA","Louisville","St. John's","Tennessee"}
-    scores = {}; rr = total_rds - rd_idx
+             "Arkansas","Virginia","UCLA","Louisville","St. John's","Tennessee","Vanderbilt",
+             "Nebraska","Texas Tech","BYU","Clemson","Iowa"}
+
+    scores = {}
+    rr = total_rds - rd_idx  # rounds remaining including this one
+
     for t in avail:
-        wp=t["win_prob"]; seed=t.get("seed") or 8
-        base=wp**1.5
-        if rr>3: d={1:0.15,2:0.25,3:0.45}.get(seed, 0.7 if seed<=5 else 1.0)
-        elif rr>1: d={1:0.4,2:0.6}.get(seed, 1.0)
-        else: d=1.0
-        b=1.2 if t["team"] in BRAND else 1.0
-        scores[t["team"]]=base*d*b
-    tot=sum(scores.values())
-    if tot==0: return {t["team"]:1/len(scores) for t in avail}
-    return {t:s/tot for t,s in scores.items()}
+        wp = t["win_prob"]
+        seed = t.get("seed") or 8
+
+        # ── HARD FLOOR: nobody picks teams below 45% in early rounds ──
+        # In late rounds (2 or fewer left), lower floor since options are scarce
+        wp_floor = 0.45 if rr > 2 else 0.35
+        if wp < wp_floor:
+            scores[t["team"]] = 0.0
+            continue
+
+        # ── Base attractiveness: steep power curve ──
+        # wp^4 means 99% → 0.96, 72% → 0.27, 59% → 0.12, 50% → 0.06
+        # This concentrates picks heavily on strong favorites
+        base = wp ** 4
+
+        # ── Seed-saving discount ──
+        # Most opponents save 1/2 seeds for later rounds.
+        # In Round 1 with 8+ rounds left, very few burn a 1-seed.
+        # By the Elite 8, everyone uses what they have.
+        if rr > 5:
+            # Very early (R64): heavy saving
+            disc = {1: 0.08, 2: 0.15, 3: 0.50, 4: 0.80, 5: 0.95}.get(seed, 1.0)
+        elif rr > 3:
+            # Mid tournament (R32/S16): moderate saving
+            disc = {1: 0.25, 2: 0.45, 3: 0.75}.get(seed, 1.0)
+        elif rr > 1:
+            # Late (E8): light saving
+            disc = {1: 0.60, 2: 0.80}.get(seed, 1.0)
+        else:
+            disc = 1.0  # Final: use everything
+
+        # ── Brand-name boost: familiar programs get picked more ──
+        brand = 1.15 if t["team"] in BRAND else 1.0
+
+        scores[t["team"]] = base * disc * brand
+
+    tot = sum(scores.values())
+    if tot == 0:
+        return {t["team"]: 1.0 / len(avail) for t in avail}
+    return {t: s / tot for t, s in scores.items()}
 
 # ═══════════════════════════════════════════════════════════
 #  SIMULATION ENGINE v2 — Smart future play + replacement cost
@@ -1201,7 +1241,12 @@ Spread → win% via normal CDF (σ = 11.0)""")
     st.markdown("""
 #### Opponent Model (Hybrid)
 - **With actual data**: Pick% = team's actual picks / total picks that day
-- **Without actual data**: win_prob^1.5 × seed-save discount × brand boost
+- **Without actual data (modeled)**:
+  - **Hard floor**: Teams below 45% win probability get 0% picks (nobody takes underdogs in survivor)
+  - **Steep power curve**: `win_prob^4` concentrates picks on strong favorites
+  - **Seed-saving**: 1-seeds discounted to 8% of base in early rounds, 2-seeds to 15%, scaling up as tournament progresses
+  - **Brand boost**: 15% lift for well-known programs
+  - Result: 4-5 seeds get ~11-13%, 3-seeds ~8-10%, 6-seeds ~3-6%, 1-seeds ~1-2%, all underdogs 0%
 
 #### Future Value (NEW in v4)
 Each team gets a Future Value score (0.0 to 1.0) representing how valuable it is to SAVE them:
