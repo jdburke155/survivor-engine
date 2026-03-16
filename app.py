@@ -1100,48 +1100,91 @@ with tab_recs:
                     st.caption(f"Already used: {', '.join(used_display)}")
                 if not res: st.warning("No teams available."); continue
 
-                # Safety pick: highest safety score above win% threshold
-                safety_picks = [r for r in res if r["Win%"] >= MIN_WP_SAFETY]
-                safety_picks.sort(key=lambda x: x["Safety"], reverse=True)
+                # Safety picks: sorted by safety score, above wp threshold
+                safety_ranked = [r for r in res if r["Win%"] >= MIN_WP_SAFETY]
+                safety_ranked.sort(key=lambda x: x["Safety"], reverse=True)
 
-                # Leverage pick: highest leverage score above win% threshold
-                lev_picks = [r for r in res if r["Win%"] >= MIN_WP_LEVERAGE]
-                lev_picks.sort(key=lambda x: x["Leverage"], reverse=True)
+                # Leverage picks: sorted by leverage score, above wp threshold
+                lev_ranked = [r for r in res if r["Win%"] >= MIN_WP_LEVERAGE]
+                lev_ranked.sort(key=lambda x: x["Leverage"], reverse=True)
 
+                # Ensure leverage pick is DIFFERENT from safety pick
+                top_safety = safety_ranked[0] if safety_ranked else None
+                top_lev = None
+                if lev_ranked:
+                    for lp in lev_ranked:
+                        if not top_safety or lp["Team"] != top_safety["Team"]:
+                            top_lev = lp
+                            break
+                    # If all leverage picks are the same as safety, take #1 leverage anyway
+                    if top_lev is None:
+                        top_lev = lev_ranked[0]
+
+                # Also find the NEXT BEST safety (different from top safety)
+                alt_safety = None
+                if len(safety_ranked) > 1:
+                    alt_safety = safety_ranked[1]
+
+                # And next best leverage (different from both top_lev and top_safety)
+                alt_lev = None
+                for lp in lev_ranked:
+                    if lp["Team"] != (top_lev["Team"] if top_lev else "") and \
+                       lp["Team"] != (top_safety["Team"] if top_safety else ""):
+                        alt_lev = lp
+                        break
+
+                def pick_card(pick, label, color, icon, score_name, score_key):
+                    if not pick:
+                        return f'<div style="border:1px solid #555;border-radius:8px;padding:12px;opacity:0.5">No {label.lower()} pick available</div>'
+                    return f'''<div style="border:2px solid {color};border-radius:8px;padding:12px;background:rgba({",".join(str(int(color.lstrip("#")[i:i+2],16)) for i in (0,2,4))},0.1)">
+                        <div style="font-size:13px;color:{color};font-weight:bold">{icon} {label}</div>
+                        <div style="font-size:22px;font-weight:bold;margin:4px 0">({pick['Seed']}) {pick['Team']}</div>
+                        <div style="font-size:13px;opacity:0.9">vs {pick['Opponent']} · Spread: {pick['Spread']:+.1f}</div>
+                        <div style="font-size:12px;margin-top:8px;line-height:1.6">
+                            Win: <b>{pick['Win%']:.0%}</b> · 
+                            Opp Pick: <b>{pick['Opp Pick%']:.1%}</b> · 
+                            Future Value: <b>{pick['Future Value']:.2f}</b><br>
+                            Survival: <b>{pick['Survival']:.0%}</b> · 
+                            Entries Avail: <b>{pick['Entries Avail']}</b><br>
+                            <span style="font-size:14px"><b>{score_name}: {pick[score_key]:.3f}</b></span>
+                        </div>
+                    </div>'''
+
+                # ── Show top 2 picks ──
                 col_s, col_l = st.columns(2)
                 with col_s:
-                    if safety_picks:
-                        top_s = safety_picks[0]
-                        st.markdown(f"""<div style="border:2px solid #2ecc71;border-radius:8px;padding:12px;background:rgba(46,204,113,0.1)">
-                            <div style="font-size:13px;color:#2ecc71;font-weight:bold">🛡️ SAFETY PICK</div>
-                            <div style="font-size:20px;font-weight:bold">({top_s['Seed']}) {top_s['Team']}</div>
-                            <div style="font-size:13px">vs {top_s['Opponent']} · Spread: {top_s['Spread']:+.1f}</div>
-                            <div style="font-size:12px;margin-top:6px">
-                                Win: {top_s['Win%']:.0%} · Opp: {top_s['Opp Pick%']:.0%} · FV: {top_s['Future Value']:.2f} · Surv: {top_s['Survival']:.0%}<br>
-                                <b>Safety Score: {top_s['Safety']:.3f}</b>
-                            </div>
-                        </div>""", unsafe_allow_html=True)
-                    else:
-                        st.warning("No picks above safety threshold")
-
+                    st.markdown(pick_card(top_safety, "SAFETY PICK", "#2ecc71", "🛡️", "Safety Score", "Safety"),
+                                unsafe_allow_html=True)
                 with col_l:
-                    if lev_picks:
-                        top_l = lev_picks[0]
-                        st.markdown(f"""<div style="border:2px solid #f39c12;border-radius:8px;padding:12px;background:rgba(243,156,18,0.1)">
-                            <div style="font-size:13px;color:#f39c12;font-weight:bold">⚡ LEVERAGE PICK</div>
-                            <div style="font-size:20px;font-weight:bold">({top_l['Seed']}) {top_l['Team']}</div>
-                            <div style="font-size:13px">vs {top_l['Opponent']} · Spread: {top_l['Spread']:+.1f}</div>
-                            <div style="font-size:12px;margin-top:6px">
-                                Win: {top_l['Win%']:.0%} · Opp: {top_l['Opp Pick%']:.0%} · FV: {top_l['Future Value']:.2f} · Surv: {top_l['Survival']:.0%}<br>
-                                <b>Leverage Score: {top_l['Leverage']:.3f}</b>
-                            </div>
-                        </div>""", unsafe_allow_html=True)
-                    else:
-                        st.warning("No picks above leverage threshold")
+                    st.markdown(pick_card(top_lev, "LEVERAGE PICK", "#f39c12", "⚡", "Leverage Score", "Leverage"),
+                                unsafe_allow_html=True)
 
-                # If they're the same pick, note it
-                if safety_picks and lev_picks and safety_picks[0]["Team"] == lev_picks[0]["Team"]:
-                    st.info(f"🎯 Both scores point to **{safety_picks[0]['Team']}** — strong pick across the board.")
+                # Same team? Show explanation + the runner-ups
+                if top_safety and top_lev and top_safety["Team"] == top_lev["Team"]:
+                    st.info(f"🎯 Both scores converge on **{top_safety['Team']}** — very strong pick. "
+                            f"Showing distinct alternatives below.")
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        if alt_safety and alt_safety["Team"] != top_safety["Team"]:
+                            st.markdown(pick_card(alt_safety, "SAFETY ALT", "#27ae60", "🛡️", "Safety Score", "Safety"),
+                                        unsafe_allow_html=True)
+                    with col_b:
+                        if alt_lev:
+                            st.markdown(pick_card(alt_lev, "LEVERAGE ALT", "#e67e22", "⚡", "Leverage Score", "Leverage"),
+                                        unsafe_allow_html=True)
+
+                # ── Always show runner-ups when different ──
+                elif top_safety and top_lev:
+                    with st.expander("📋 Runner-up options"):
+                        col_a, col_b = st.columns(2)
+                        with col_a:
+                            if alt_safety:
+                                st.markdown(pick_card(alt_safety, "SAFETY #2", "#27ae60", "🛡️", "Safety Score", "Safety"),
+                                            unsafe_allow_html=True)
+                        with col_b:
+                            if alt_lev:
+                                st.markdown(pick_card(alt_lev, "LEVERAGE #2", "#e67e22", "⚡", "Leverage Score", "Leverage"),
+                                            unsafe_allow_html=True)
 
                 # Full table sorted by safety
                 st.markdown("##### Full Rankings")
