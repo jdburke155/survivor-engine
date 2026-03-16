@@ -356,42 +356,152 @@ def compute_opp_pct_model(avail, rd_idx, total_rds, pick_counts, current_day, to
     return {t:s/tot for t,s in scores.items()}
 
 # ═══════════════════════════════════════════════════════════
-#  SIMULATION
+#  SIMULATION ENGINE v2 — Smart future play + replacement cost
 # ═══════════════════════════════════════════════════════════
 def win_prob(spread):
     if spread is None: return 0.5
     return float(norm.cdf(-spread / SPREAD_SIGMA))
 
+def compute_future_value(seed, wp, rd_idx, total_rds):
+    """
+    How valuable is SAVING this team for future rounds?
+    Returns 0.0 to 1.0. Higher = save this team, don't burn it today.
+
+    Core insight: a 1-seed's value comes from SCARCITY in later rounds.
+    In Round 1 you have 32 teams to pick from. In the Elite 8 you have 4.
+    The 1-seed is replaceable today (3/4/5 seeds at 75-90%) but irreplaceable
+    in the E8 where your alternatives might be 55-65%.
+    """
+    if seed is None: seed = 8
+    rounds_remaining = total_rds - rd_idx - 1
+    if rounds_remaining <= 0:
+        return 0.0  # Last day — use everything, no future
+
+    # Seed premium: how irreplaceable is this team in later rounds?
+    if seed == 1:   premium = 0.95
+    elif seed == 2: premium = 0.82
+    elif seed == 3: premium = 0.60
+    elif seed == 4: premium = 0.40
+    elif seed == 5: premium = 0.25
+    elif seed <= 7: premium = 0.10
+    else:           premium = 0.0   # 8+ seeds: no future premium, burn freely
+
+    # Time scaling: more rounds remaining = higher value to save
+    # Diminishing returns — saving for 8 rounds isn't 4x better than 4
+    time_factor = min(rounds_remaining / 4.0, 1.0)
+
+    # Survival probability: team must actually be alive later to have future value
+    # A 1-seed that might lose today has less future value
+    alive_factor = min(wp * 1.3, 1.0)
+
+    return premium * time_factor * alive_factor
+
+def smart_future_pick(available, rounds_remaining):
+    """
+    Pick the best team for a future sim round using seed-saving logic.
+    Instead of always grabbing the highest win-prob (which is always a 1-seed),
+    this models how a SMART player would actually play a survivor pool.
+    """
+    if not available:
+        return None
+
+    if rounds_remaining <= 1:
+        # Last round: use your best team
+        return max(available, key=lambda x: x["win_prob"])
+
+    if rounds_remaining > 3:
+        # Early/mid tournament: avoid 1-seeds and 2-seeds if possible
+        mid_tier = [t for t in available if (t.get("seed") or 99) > 2]
+        if mid_tier:
+            return max(mid_tier, key=lambda x: x["win_prob"])
+
+    if rounds_remaining > 1:
+        # Mid tournament: avoid 1-seeds only
+        non_top = [t for t in available if (t.get("seed") or 99) > 1]
+        if non_top:
+            return max(non_top, key=lambda x: x["win_prob"])
+
+    # Fallback: use whatever is best
+    return max(available, key=lambda x: x["win_prob"])
+
 def sim_survivor(pick, avail_today, future_days, n, rd_idx, total_rds, used,
                  pick_counts, total_entries):
-    """Monte Carlo: simulate survival across today + all future rounds."""
+    """
+    Monte Carlo with SMART future play.
+    Future rounds use seed-aware strategy instead of pure greedy.
+    """
     today_map = {t["team"]: t["win_prob"] for t in avail_today}
     if pick not in today_map: return 0.0
 
     survivals = 0
-
     for _ in range(n):
         ok = True; su = set(used); su.add(pick)
 
-        # Today: does my pick win?
-        my_win = np.random.random() < today_map[pick]
-        if not my_win:
+        # Today
+        if np.random.random() >= today_map[pick]:
             ok = False
-        else:
-            # Future days
-            for ft in future_days:
+        elif future_days:
+            # Future rounds: smart play
+            for fi, ft in enumerate(future_days):
+                rr = total_rds - (rd_idx + 1 + fi)  # rounds remaining after this future day
                 av = [t for t in ft if t["team"] not in su]
-                if not av: ok = False; break
-                best = max(av, key=lambda x: x["win_prob"])
+                if not av:
+                    ok = False; break
+                best = smart_future_pick(av, rr)
+                if best is None:
+                    ok = False; break
                 su.add(best["team"])
-                if np.random.random() >= best["win_prob"]: ok = False; break
+                if np.random.random() >= best["win_prob"]:
+                    ok = False; break
 
         if ok: survivals += 1
 
     return survivals / max(n, 1)
 
-def leverage(wp, opp_pct, survival):
-    return wp * 0.35 + (1 - opp_pct) * 0.25 + survival * 0.40
+def compute_safety_score(wp, future_value, survival):
+    """
+    SAFETY PICK: Maximize today's survival while preserving future assets.
+
+    Formula: win_prob × (1 - 0.7 × future_value) × (0.3 + 0.7 × survival)
+
+    - Heavily penalizes burning high-FV teams (70% discount on future value)
+    - Still requires decent win probability
+    - Survival provides a bonus but isn't dominant
+
+    Examples (Round 1):
+      Duke (99% wp, 0.95 FV, 85% surv) = 0.99 × 0.335 × 0.895 = 0.297
+      Louisville (72% wp, 0.10 FV, 80% surv) = 0.72 × 0.930 × 0.860 = 0.576
+      → Louisville wins. That's correct.
+    """
+    fv_penalty = 1.0 - 0.7 * future_value
+    surv_factor = 0.3 + 0.7 * survival
+    return wp * fv_penalty * surv_factor
+
+def compute_leverage_score(wp, opp_pct, future_value, survival):
+    """
+    LEVERAGE PICK: Maximize contrarian edge while staying +EV.
+
+    Formula: (1 - opp_pct)^0.6 × win_prob × (1 - 0.5 × future_value) × survival^0.5
+
+    - Contrarian value is key (but sub-linear — 1% vs 5% matters less than 5% vs 20%)
+    - Still requires solid win probability
+    - Moderate future-value penalty (50% discount — willing to burn mid-seeds for big edge)
+    - Survival has diminishing returns (square root)
+
+    Examples (Round 1):
+      Ohio State (59% wp, 12% opp, 0.0 FV, 70% surv) = 0.917 × 0.59 × 1.0 × 0.837 = 0.453
+      Duke (99% wp, 2% opp, 0.95 FV, 85% surv) = 0.988 × 0.99 × 0.525 × 0.922 = 0.473
+      Louisville (72% wp, 8% opp, 0.10 FV, 80% surv) = 0.951 × 0.72 × 0.95 × 0.894 = 0.582
+      → Louisville wins leverage too. 8v9 games are viable contrarian plays.
+    """
+    contrarian = (1.0 - opp_pct) ** 0.6
+    fv_penalty = 1.0 - 0.5 * future_value
+    surv_factor = survival ** 0.5 if survival > 0 else 0
+    return contrarian * wp * fv_penalty * surv_factor
+
+# Minimum win probability thresholds
+MIN_WP_SAFETY = 0.55     # Don't recommend safety picks below 55%
+MIN_WP_LEVERAGE = 0.50   # Leverage can go slightly lower for big contrarian edge
 
 # ═══════════════════════════════════════════════════════════
 #  SESSION STATE INIT — Load from disk first, then defaults
@@ -869,8 +979,8 @@ with tab_sweat:
 # ═══════════════════════════════════════════════════════════
 with tab_recs:
     st.markdown("### 🎯 Pick Recommendations")
-    st.markdown("*Uses actual pick data when available, modeled behavior otherwise. "
-                "Accounts for opponent entries that have already used specific teams.*")
+    st.markdown("Two picks per entry: **🛡️ Safety** (survive today, preserve future assets) "
+                "and **⚡ Leverage** (maximum contrarian edge while staying +EV)")
 
     tg = {gid:g for gid,g in live_bracket.items() if g.get("day")==current_day}
     if tg:
@@ -889,21 +999,23 @@ with tab_recs:
                                      st.session_state.pick_counts, current_day,
                                      st.session_state.total_entries)
 
-        # Show data source
         has_actual = any(st.session_state.pick_counts.get(f"{current_day}|{t['team']}", 0) > 0 for t in at)
         if has_actual:
             st.success("✅ Using **actual pick data** for opponent modeling")
         else:
             st.info("📊 Using **modeled opponent behavior** (enter actual picks in Pick Tracking tab for better accuracy)")
 
+        # Build future days with SEED DATA (critical for smart future play)
         fdt = []
         for fi in range(st.session_state.current_day_idx+1, min(st.session_state.current_day_idx+5, len(TOURNAMENT_DAYS))):
             fd=TOURNAMENT_DAYS[fi]; fg={gid:g for gid,g in live_bracket.items() if g.get("day")==fd}
             fa=[]
             for gid,g in fg.items():
                 ok=f"spread_{gid}"; sp=st.session_state.spread_overrides.get(ok,g.get("spread") or 0); wp_=win_prob(sp)
-                if g["team_a"] not in eliminated and "W(" not in g["team_a"]: fa.append({"team":g["team_a"],"win_prob":wp_})
-                if g["team_b"] not in eliminated and "W(" not in g["team_b"]: fa.append({"team":g["team_b"],"win_prob":1-wp_})
+                if g["team_a"] not in eliminated and "W(" not in g["team_a"]:
+                    fa.append({"team":g["team_a"],"win_prob":wp_,"seed":g.get("seed_a")})
+                if g["team_b"] not in eliminated and "W(" not in g["team_b"]:
+                    fa.append({"team":g["team_b"],"win_prob":1-wp_,"seed":g.get("seed_b")})
             fdt.append(fa)
 
         if st.button("🚀 Run Simulation Engine", type="primary", use_container_width=True):
@@ -916,22 +1028,24 @@ with tab_recs:
                 for idx, ti in enumerate(ea):
                     pv = ((en-1)*len(ea)+idx)/max(st.session_state.my_entries*len(ea),1)
                     prog.progress(min(pv,1.0), f"Entry #{en}: {ti['team']}...")
+
                     sv = sim_survivor(ti["team"], ea, fdt, st.session_state.n_sims,
                                        st.session_state.current_day_idx, len(TOURNAMENT_DAYS), used,
                                        st.session_state.pick_counts, st.session_state.total_entries)
                     op = opp.get(ti["team"], 0)
-
-                    # Compute entries with this team still available
+                    fv = compute_future_value(ti["seed"], ti["win_prob"],
+                                              st.session_state.current_day_idx, len(TOURNAMENT_DAYS))
                     avail_count = compute_entries_with_team_available(
                         ti["team"], st.session_state.current_day_idx,
                         st.session_state.pick_counts, st.session_state.total_entries)
 
-                    lv = leverage(ti["win_prob"], op, sv)
+                    safety = compute_safety_score(ti["win_prob"], fv, sv)
+                    lev = compute_leverage_score(ti["win_prob"], op, fv, sv)
+
                     res.append({"Team":ti["team"],"Seed":ti["seed"],"Region":ti["region"],
                         "Opponent":ti["opponent"],"Spread":ti["spread"],"Win%":ti["win_prob"],
-                        "Opp Pick%":op,"Entries Avail":avail_count,
-                        "Survival":sv,"Leverage":lv})
-                res.sort(key=lambda x: x["Leverage"], reverse=True)
+                        "Opp Pick%":op,"Future Value":fv,"Entries Avail":avail_count,
+                        "Survival":sv,"Safety":safety,"Leverage":lev})
                 ar[en] = res
             prog.progress(1.0, "Done!"); st.session_state.sim_results = ar; time.sleep(0.3); prog.empty()
 
@@ -942,33 +1056,89 @@ with tab_recs:
                 if used:
                     used_display = []
                     for t in sorted(used):
-                        if t in eliminated:
-                            used_display.append(f"~~{t}~~")
-                        else:
-                            used_display.append(t)
+                        used_display.append(f"~~{t}~~" if t in eliminated else t)
                     st.caption(f"Already used: {', '.join(used_display)}")
                 if not res: st.warning("No teams available."); continue
-                top = res[0]
-                st.success(
-                    f"**TOP PICK: ({top['Seed']}) {top['Team']}** vs {top['Opponent']} | "
-                    f"Spread: {top['Spread']:+.1f} | Win: {top['Win%']:.1%} | "
-                    f"Opp Pick: {top['Opp Pick%']:.1%} | "
-                    f"Entries w/ Team: {top['Entries Avail']} | "
-                    f"Survival: {top['Survival']:.1%} | "
-                    f"**Leverage: {top['Leverage']:.3f}**")
+
+                # Safety pick: highest safety score above win% threshold
+                safety_picks = [r for r in res if r["Win%"] >= MIN_WP_SAFETY]
+                safety_picks.sort(key=lambda x: x["Safety"], reverse=True)
+
+                # Leverage pick: highest leverage score above win% threshold
+                lev_picks = [r for r in res if r["Win%"] >= MIN_WP_LEVERAGE]
+                lev_picks.sort(key=lambda x: x["Leverage"], reverse=True)
+
+                col_s, col_l = st.columns(2)
+                with col_s:
+                    if safety_picks:
+                        top_s = safety_picks[0]
+                        st.markdown(f"""<div style="border:2px solid #2ecc71;border-radius:8px;padding:12px;background:rgba(46,204,113,0.1)">
+                            <div style="font-size:13px;color:#2ecc71;font-weight:bold">🛡️ SAFETY PICK</div>
+                            <div style="font-size:20px;font-weight:bold">({top_s['Seed']}) {top_s['Team']}</div>
+                            <div style="font-size:13px">vs {top_s['Opponent']} · Spread: {top_s['Spread']:+.1f}</div>
+                            <div style="font-size:12px;margin-top:6px">
+                                Win: {top_s['Win%']:.0%} · Opp: {top_s['Opp Pick%']:.0%} · FV: {top_s['Future Value']:.2f} · Surv: {top_s['Survival']:.0%}<br>
+                                <b>Safety Score: {top_s['Safety']:.3f}</b>
+                            </div>
+                        </div>""", unsafe_allow_html=True)
+                    else:
+                        st.warning("No picks above safety threshold")
+
+                with col_l:
+                    if lev_picks:
+                        top_l = lev_picks[0]
+                        st.markdown(f"""<div style="border:2px solid #f39c12;border-radius:8px;padding:12px;background:rgba(243,156,18,0.1)">
+                            <div style="font-size:13px;color:#f39c12;font-weight:bold">⚡ LEVERAGE PICK</div>
+                            <div style="font-size:20px;font-weight:bold">({top_l['Seed']}) {top_l['Team']}</div>
+                            <div style="font-size:13px">vs {top_l['Opponent']} · Spread: {top_l['Spread']:+.1f}</div>
+                            <div style="font-size:12px;margin-top:6px">
+                                Win: {top_l['Win%']:.0%} · Opp: {top_l['Opp Pick%']:.0%} · FV: {top_l['Future Value']:.2f} · Surv: {top_l['Survival']:.0%}<br>
+                                <b>Leverage Score: {top_l['Leverage']:.3f}</b>
+                            </div>
+                        </div>""", unsafe_allow_html=True)
+                    else:
+                        st.warning("No picks above leverage threshold")
+
+                # If they're the same pick, note it
+                if safety_picks and lev_picks and safety_picks[0]["Team"] == lev_picks[0]["Team"]:
+                    st.info(f"🎯 Both scores point to **{safety_picks[0]['Team']}** — strong pick across the board.")
+
+                # Full table sorted by safety
+                st.markdown("##### Full Rankings")
+                sort_col = st.radio("Sort by", ["Safety", "Leverage", "Win%", "Future Value"],
+                                     horizontal=True, key=f"sort_{en}")
                 df = pd.DataFrame(res)
-                for col,fmt in [("Win%","{:.1%}"),("Opp Pick%","{:.1%}"),("Survival","{:.1%}"),
-                                ("Leverage","{:.3f}"),("Spread","{:+.1f}")]:
+                df = df.sort_values(sort_col, ascending=(sort_col == "Future Value"))
+
+                for col,fmt in [("Win%","{:.1%}"),("Opp Pick%","{:.1%}"),("Future Value","{:.2f}"),
+                                ("Survival","{:.1%}"),("Safety","{:.3f}"),("Leverage","{:.3f}"),
+                                ("Spread","{:+.1f}")]:
                     df[col] = df[col].apply(lambda x, f=fmt: f.format(x))
                 st.dataframe(df, use_container_width=True, hide_index=True)
                 st.markdown("---")
 
-            st.markdown("""### 📝 Strategy
-- **Leverage** = 35% Win% + 25% Contrarian + 40% Future EV
-- **Entries Avail** = how many pool entries still have this team available (based on actual pick data)
-- When actual picks are entered, Opp Pick% uses **real data** instead of modeled behavior
-- **Future EV** accounts for which teams you'll need later — don't burn a 1-seed on Day 1
-- Lower Opp Pick% = more contrarian = more opponents eliminated when your pick wins""")
+            st.markdown("""### 📝 How to Read This
+
+**🛡️ Safety Pick** — Best team to survive today without wasting a premium asset.
+The formula heavily penalizes burning 1/2-seeds in early rounds because you'll need them
+when the field narrows. A 6-seed at 72% often scores higher than a 1-seed at 99% early on.
+
+**⚡ Leverage Pick** — Best contrarian play that's still +EV. Maximizes opponent eliminations.
+If 15% of the pool is on Team X and only 3% on Team Y, and both have ~70% win probability,
+Team Y is the leverage play — when it wins, you survive while more opponents are eliminated.
+
+**Key columns:**
+- **Future Value** — 0.0 to 1.0, how valuable it is to SAVE this team. High FV = don't use today.
+  1-seeds in Round 1 have ~0.95 FV. 8-seeds have ~0.0. This drops as the tournament progresses.
+- **Survival** — Monte Carlo probability of surviving ALL remaining rounds if you pick this team today.
+  The sim uses smart future play (saves top seeds) instead of always grabbing the best available.
+- **Opp Pick%** — What % of opponents are on this team. Lower = more contrarian.
+- **Entries Avail** — How many opponents still have this team available (based on actual pick data).
+
+**When to pick Safety vs Leverage:**
+- **Ahead / many entries alive** → Leverage (maximize opponent eliminations)
+- **Behind / need to survive** → Safety (don't die today)
+- **Both agree** → Strong signal, take it""")
         else:
             st.info("Click **Run Simulation Engine** to generate picks.")
     else:
@@ -1033,20 +1203,38 @@ Spread → win% via normal CDF (σ = 11.0)""")
 - **With actual data**: Pick% = team's actual picks / total picks that day
 - **Without actual data**: win_prob^1.5 × seed-save discount × brand boost
 
-#### Monte Carlo Lookahead
-Each pick simulated forward through remaining days with greedy future play.
+#### Future Value (NEW in v4)
+Each team gets a Future Value score (0.0 to 1.0) representing how valuable it is to SAVE them:
+- **Seed premium**: 1-seeds = 0.95, 2-seeds = 0.82, 3-seeds = 0.60, 4 = 0.40, 5 = 0.25, 6-7 = 0.10, 8+ = 0.0
+- **Time scaling**: scales with rounds remaining (more future = more valuable to save)
+- **Alive factor**: weighted by win probability (team must actually survive to have future value)
 
-#### Leverage = 35% Win% + 25% (1 - Opp Pick%) + 40% Survival EV
+#### Smart Future Simulation (NEW in v4)
+The Monte Carlo sim now uses **smart future play** instead of greedy:
+- Early tournament (>3 rounds left): avoids 1-seeds AND 2-seeds in future picks
+- Mid tournament (2-3 rounds left): avoids 1-seeds only
+- Late tournament (last round): uses whatever is best
+This properly models the COST of burning a premium team early.
+
+#### Safety Score
+`win_prob × (1 - 0.7 × future_value) × (0.3 + 0.7 × survival)`
+Maximizes today's survival while heavily penalizing use of future-valuable teams.
+
+#### Leverage Score
+`(1 - opp_pct)^0.6 × win_prob × (1 - 0.5 × future_value) × survival^0.5`
+Maximizes contrarian edge (sub-linear to avoid chasing extreme low-pick teams) with moderate future-value penalty.
+
+#### Minimum Win Probability Thresholds
+- Safety picks: must be ≥55% win probability
+- Leverage picks: must be ≥50% win probability
 
 #### Data Persistence
 - All picks, spreads, settings, and pick counts **auto-save** to `survivor_state.json` on every interaction
-- On app restart, data **auto-loads** from this file — no manual action needed
-- **Local / VPS deployment**: data persists indefinitely across restarts
-- **Streamlit Cloud**: data persists within an active session but resets on hibernation (~15 min idle). Use **Export Data** (sidebar) before closing the app, then **Import Data** next session to restore everything
-- Export/Import is also useful for backing up your data or moving between machines""")
+- On app restart, data **auto-loads** from this file
+- Use **Export/Import** in sidebar for Streamlit Cloud portability""")
 
 st.markdown("---")
-st.caption("Survivor Engine v3.1 | ESPN API auto-update | Real pick data integration | Auto-save enabled")
+st.caption("Survivor Engine v4.0 | Smart sim + Future Value + Safety/Leverage picks | ESPN auto-update")
 
 # ═══════════════════════════════════════════════════════════
 #  AUTO-SAVE — runs at end of every Streamlit rerun
