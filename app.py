@@ -389,12 +389,16 @@ def smart_future_pick(available, rounds_remaining):
 def sim_survivor(pick, avail_today, future_days, n, rd_idx, total_rds, used, pick_counts, total_entries):
     today_map = {t["team"]: t["win_prob"] for t in avail_today}
     if pick not in today_map: return 0.0
+
+    # Filter to only future days that have known teams
+    known_future = [ft for ft in future_days if ft]
+
     survivals = 0
     for _ in range(n):
         ok = True; su = set(used); su.add(pick)
         if np.random.random() >= today_map[pick]: ok = False
-        elif future_days:
-            for fi, ft in enumerate(future_days):
+        elif known_future:
+            for fi, ft in enumerate(known_future):
                 rr = total_rds - (rd_idx + 1 + fi)
                 av = [t for t in ft if t["team"] not in su]
                 if not av: ok = False; break
@@ -406,7 +410,10 @@ def sim_survivor(pick, avail_today, future_days, n, rd_idx, total_rds, used, pic
     return survivals / max(n, 1)
 
 def compute_safety_score(wp, fv, survival):
-    return wp * (1.0 - 0.7*fv) * (0.3 + 0.7*survival)
+    # When survival is 0 (no future data yet), fall back to wp × fv_penalty alone
+    # so scores aren't all zeroed out pre-tournament
+    surv_factor = (0.3 + 0.7 * survival) if survival > 0 else 0.5
+    return wp * (1.0 - 0.7 * fv) * surv_factor
 
 def compute_leverage_score(wp, opp_pct, fv, survival):
     """
@@ -421,7 +428,8 @@ def compute_leverage_score(wp, opp_pct, fv, survival):
     contrarian = (1.0 - opp_pct) ** 1.5
     wp_capped = min(wp, 0.85) ** 0.5
     fv_penalty = 1.0 - 0.7 * fv
-    surv_factor = survival ** 0.5 if survival > 0 else 0
+    # When survival is 0 (no future data yet), use 0.5 floor so scores aren't all zero
+    surv_factor = survival ** 0.5 if survival > 0 else 0.5
     return contrarian * wp_capped * fv_penalty * surv_factor
 
 MIN_WP_SAFETY = 0.55
