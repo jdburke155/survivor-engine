@@ -13,70 +13,81 @@ SPREAD_SIGMA = 11.0
 SAVE_FILE = "survivor_state.json"
 
 # ═══════════════════════════════════════════════════════════
-#  PERSISTENCE — Auto-save/load all manual data to JSON
+#  PERSISTENCE — Multi-contest aware
 # ═══════════════════════════════════════════════════════════
-PERSISTED_KEYS = ["total_entries", "my_entries", "n_sims", "current_day_idx",
-                  "spread_overrides", "manual_winners", "pick_counts", "my_picks"]
+# Per-contest keys (each contest has its own copy)
+CONTEST_KEYS = ["contest_name", "total_entries", "my_entries", "pick_counts", "my_picks"]
+# Shared keys (same across all contests)
+SHARED_KEYS = ["n_sims", "current_day_idx", "spread_overrides", "manual_winners"]
+
+DEFAULT_CONTESTS = {
+    "contest_1": {"contest_name": "Contest 1", "total_entries": 900, "my_entries": 3, "pick_counts": {}, "my_picks": {}},
+    "contest_2": {"contest_name": "Contest 2", "total_entries": 100, "my_entries": 1, "pick_counts": {}, "my_picks": {}},
+}
+
+def _ser(val):
+    """Serialize sets/dicts for JSON."""
+    if isinstance(val, set): return list(val)
+    if isinstance(val, dict): return {str(k): (_ser(v) if isinstance(v, (set, dict)) else v) for k, v in val.items()}
+    return val
 
 def save_state():
-    """Save all persisted session state to a local JSON file."""
-    data = {}
-    for k in PERSISTED_KEYS:
-        val = st.session_state.get(k)
-        if val is not None:
-            # Convert sets to lists for JSON serialization
-            if isinstance(val, set):
-                data[k] = list(val)
-            elif isinstance(val, dict):
-                data[k] = {str(dk): (list(dv) if isinstance(dv, set) else dv)
-                           for dk, dv in val.items()}
-            else:
-                data[k] = val
+    data = {"active_contest": st.session_state.get("active_contest", "contest_1"),
+            "contests": {}, "shared": {}}
+    for cid, cd in st.session_state.get("contests", {}).items():
+        data["contests"][cid] = {k: _ser(cd.get(k)) for k in CONTEST_KEYS if k in cd}
+    for k in SHARED_KEYS:
+        v = st.session_state.get(k)
+        if v is not None: data["shared"][k] = _ser(v)
     try:
-        with open(SAVE_FILE, "w") as f:
-            json.dump(data, f, indent=2)
+        with open(SAVE_FILE, "w") as f: json.dump(data, f, indent=2)
         return True
-    except Exception as e:
-        return False
+    except: return False
 
 def load_state():
-    """Load persisted state from JSON file. Returns dict or None."""
-    if not os.path.exists(SAVE_FILE):
-        return None
+    if not os.path.exists(SAVE_FILE): return None
     try:
-        with open(SAVE_FILE, "r") as f:
-            data = json.load(f)
-        return data
-    except:
-        return None
+        with open(SAVE_FILE, "r") as f: return json.load(f)
+    except: return None
 
 def export_state_json():
-    """Export current state as a JSON string for download."""
-    data = {}
-    for k in PERSISTED_KEYS:
-        val = st.session_state.get(k)
-        if val is not None:
-            if isinstance(val, set):
-                data[k] = list(val)
-            elif isinstance(val, dict):
-                data[k] = {str(dk): (list(dv) if isinstance(dv, set) else dv)
-                           for dk, dv in val.items()}
-            else:
-                data[k] = val
+    data = {"active_contest": st.session_state.get("active_contest", "contest_1"),
+            "contests": {}, "shared": {}}
+    for cid, cd in st.session_state.get("contests", {}).items():
+        data["contests"][cid] = {k: _ser(cd.get(k)) for k in CONTEST_KEYS if k in cd}
+    for k in SHARED_KEYS:
+        v = st.session_state.get(k)
+        if v is not None: data["shared"][k] = _ser(v)
     return json.dumps(data, indent=2)
 
 def import_state_json(json_str):
-    """Import state from a JSON string into session state."""
     try:
         data = json.loads(json_str)
-        for k in PERSISTED_KEYS:
-            if k in data:
-                st.session_state[k] = data[k]
-        # Also save to disk immediately
+        if "contests" in data:
+            st.session_state.contests = data["contests"]
+            st.session_state.active_contest = data.get("active_contest", "contest_1")
+            for k in SHARED_KEYS:
+                if k in data.get("shared", {}): st.session_state[k] = data["shared"][k]
+        else:
+            # Legacy single-contest import
+            legacy = {k: data[k] for k in CONTEST_KEYS if k in data}
+            if "contest_name" not in legacy: legacy["contest_name"] = "Imported"
+            st.session_state.contests = {"contest_1": legacy}
+            st.session_state.active_contest = "contest_1"
+            for k in SHARED_KEYS:
+                if k in data: st.session_state[k] = data[k]
         save_state()
         return True
-    except:
-        return False
+    except: return False
+
+def ctx():
+    """Get active contest data dict."""
+    cid = st.session_state.get("active_contest", "contest_1")
+    cs = st.session_state.get("contests", {})
+    if cid not in cs:
+        cs[cid] = dict(DEFAULT_CONTESTS.get(cid, DEFAULT_CONTESTS["contest_1"]))
+        st.session_state.contests = cs
+    return cs[cid]
 
 # ═══════════════════════════════════════════════════════════
 #  BRACKET DATA
@@ -183,7 +194,6 @@ NAME_ALIASES = {
     "Saint Mary's Gaels":"Saint Mary's","Texas A&M Aggies":"Texas A&M","Houston Cougars":"Houston",
     "Idaho Vandals":"Idaho",
 }
-
 def normalize_name(n):
     if n in NAME_ALIASES: return NAME_ALIASES[n]
     for a, c in NAME_ALIASES.items():
@@ -251,12 +261,10 @@ def get_region(gid):
     if "_MW_" in gid or gid.endswith("_MW"): return "Midwest"
     if "_S_" in gid or gid.endswith("_S"): return "South"
     return "TBD"
-
 def get_round(gid):
     for p in ["CHAMP","S16","R2","R1","E8","FF"]:
         if gid.startswith(p): return p
     return "R1"
-
 def assign_day(gid, region):
     r = get_round(gid)
     if r=="R2": return REGION_DAY_R2.get(region,"Sat 3/21")
@@ -265,7 +273,6 @@ def assign_day(gid, region):
     if r=="FF": return "Sat 4/4"
     if r=="CHAMP": return "Mon 4/6"
     return None
-
 def build_bracket(winners):
     games = dict(FIRST_ROUND)
     tinfo = {}
@@ -291,10 +298,9 @@ def build_bracket(winners):
     return games
 
 # ═══════════════════════════════════════════════════════════
-#  PICK TRACKING & OPPONENT MODELING
+#  PICK TRACKING & OPPONENT MODEL
 # ═══════════════════════════════════════════════════════════
 def get_all_teams():
-    """Get sorted list of all teams in the bracket."""
     teams = set()
     for g in FIRST_ROUND.values():
         for t in [g["team_a"], g["team_b"]]:
@@ -302,34 +308,20 @@ def get_all_teams():
     return sorted(teams)
 
 def get_team_seed(team):
-    """Look up seed for a team."""
     for g in FIRST_ROUND.values():
         if g["team_a"] == team: return g["seed_a"]
         if g["team_b"] == team: return g["seed_b"]
     return None
 
 def compute_entries_with_team_available(team, day_idx, pick_counts, total_entries):
-    """
-    Given actual pick counts per day, compute how many entries still have
-    this team available (haven't used it yet in a prior day).
-    """
-    used_on_team = 0
-    for d_idx in range(day_idx):
-        day = TOURNAMENT_DAYS[d_idx]
-        key = f"{day}|{team}"
-        used_on_team += pick_counts.get(key, 0)
-    return max(total_entries - used_on_team, 0)
+    used = 0
+    for d_i in range(day_idx):
+        used += pick_counts.get(f"{TOURNAMENT_DAYS[d_i]}|{team}", 0)
+    return max(total_entries - used, 0)
 
 def compute_opp_pct_model(avail, rd_idx, total_rds, pick_counts, current_day, total_entries):
-    """
-    Hybrid model: use actual pick data if available for current day,
-    otherwise fall back to realistic survivor pool modeling.
-    """
     if not avail: return {}
-
-    # Check if we have actual data for today
     has_actual = any(pick_counts.get(f"{current_day}|{t['team']}", 0) > 0 for t in avail)
-
     if has_actual:
         result = {}
         total_picks = sum(pick_counts.get(f"{current_day}|{t['team']}", 0) for t in avail)
@@ -337,234 +329,119 @@ def compute_opp_pct_model(avail, rd_idx, total_rds, pick_counts, current_day, to
             cnt = pick_counts.get(f"{current_day}|{t['team']}", 0)
             result[t["team"]] = cnt / max(total_picks, 1)
         return result
-
-    # ── Realistic modeled behavior ──
-    # Key insight: in a survivor pool, NOBODY picks heavy underdogs in early
-    # rounds when all teams are available. Picks concentrate heavily on
-    # mid-tier favorites (3-7 seeds) with some on 1-2 seeds from impatient players.
-    #
-    # Teams below ~45% win probability get essentially zero picks.
-
     BRAND = {"Duke","Kansas","UConn","Michigan","Florida","Arizona","Kentucky","North Carolina",
              "Gonzaga","Houston","Purdue","Michigan State","Alabama","Iowa State","Illinois",
              "Arkansas","Virginia","UCLA","Louisville","St. John's","Tennessee","Vanderbilt",
              "Nebraska","Texas Tech","BYU","Clemson","Iowa"}
-
-    scores = {}
-    rr = total_rds - rd_idx  # rounds remaining including this one
-
+    scores = {}; rr = total_rds - rd_idx
     for t in avail:
-        wp = t["win_prob"]
-        seed = t.get("seed") or 8
-
-        # ── HARD FLOOR: nobody picks teams below 45% in early rounds ──
-        # In late rounds (2 or fewer left), lower floor since options are scarce
+        wp = t["win_prob"]; seed = t.get("seed") or 8
         wp_floor = 0.45 if rr > 2 else 0.35
-        if wp < wp_floor:
-            scores[t["team"]] = 0.0
-            continue
-
-        # ── Base attractiveness: steep power curve ──
-        # wp^4 means 99% → 0.96, 72% → 0.27, 59% → 0.12, 50% → 0.06
-        # This concentrates picks heavily on strong favorites
+        if wp < wp_floor: scores[t["team"]] = 0.0; continue
         base = wp ** 4
-
-        # ── Seed-saving discount ──
-        # Most opponents save 1/2 seeds for later rounds.
-        # In Round 1 with 8+ rounds left, very few burn a 1-seed.
-        # By the Elite 8, everyone uses what they have.
-        if rr > 5:
-            # Very early (R64): heavy saving
-            disc = {1: 0.08, 2: 0.15, 3: 0.50, 4: 0.80, 5: 0.95}.get(seed, 1.0)
-        elif rr > 3:
-            # Mid tournament (R32/S16): moderate saving
-            disc = {1: 0.25, 2: 0.45, 3: 0.75}.get(seed, 1.0)
-        elif rr > 1:
-            # Late (E8): light saving
-            disc = {1: 0.60, 2: 0.80}.get(seed, 1.0)
-        else:
-            disc = 1.0  # Final: use everything
-
-        # ── Brand-name boost: familiar programs get picked more ──
+        if rr > 5: disc = {1:0.08,2:0.15,3:0.50,4:0.80,5:0.95}.get(seed, 1.0)
+        elif rr > 3: disc = {1:0.25,2:0.45,3:0.75}.get(seed, 1.0)
+        elif rr > 1: disc = {1:0.60,2:0.80}.get(seed, 1.0)
+        else: disc = 1.0
         brand = 1.15 if t["team"] in BRAND else 1.0
-
         scores[t["team"]] = base * disc * brand
-
     tot = sum(scores.values())
-    if tot == 0:
-        return {t["team"]: 1.0 / len(avail) for t in avail}
-    return {t: s / tot for t, s in scores.items()}
+    if tot == 0: return {t["team"]: 1.0/len(avail) for t in avail}
+    return {t: s/tot for t, s in scores.items()}
 
 # ═══════════════════════════════════════════════════════════
-#  SIMULATION ENGINE v2 — Smart future play + replacement cost
+#  SIMULATION ENGINE
 # ═══════════════════════════════════════════════════════════
 def win_prob(spread):
     if spread is None: return 0.5
     return float(norm.cdf(-spread / SPREAD_SIGMA))
 
 def compute_future_value(seed, wp, rd_idx, total_rds):
-    """
-    How valuable is SAVING this team for future rounds?
-    Returns 0.0 to 1.0. Higher = save this team, don't burn it today.
-
-    Core insight: a 1-seed's value comes from SCARCITY in later rounds.
-    In Round 1 you have 32 teams to pick from. In the Elite 8 you have 4.
-    The 1-seed is replaceable today (3/4/5 seeds at 75-90%) but irreplaceable
-    in the E8 where your alternatives might be 55-65%.
-    """
     if seed is None: seed = 8
-    rounds_remaining = total_rds - rd_idx - 1
-    if rounds_remaining <= 0:
-        return 0.0  # Last day — use everything, no future
-
-    # Seed premium: how irreplaceable is this team in later rounds?
-    if seed == 1:   premium = 0.95
+    rr = total_rds - rd_idx - 1
+    if rr <= 0: return 0.0
+    if seed == 1: premium = 0.95
     elif seed == 2: premium = 0.82
     elif seed == 3: premium = 0.60
     elif seed == 4: premium = 0.40
     elif seed == 5: premium = 0.25
     elif seed <= 7: premium = 0.10
-    else:           premium = 0.0   # 8+ seeds: no future premium, burn freely
-
-    # Time scaling: more rounds remaining = higher value to save
-    # Diminishing returns — saving for 8 rounds isn't 4x better than 4
-    time_factor = min(rounds_remaining / 4.0, 1.0)
-
-    # Survival probability: team must actually be alive later to have future value
-    # A 1-seed that might lose today has less future value
-    alive_factor = min(wp * 1.3, 1.0)
-
-    return premium * time_factor * alive_factor
+    else: premium = 0.0
+    return premium * min(rr/4.0, 1.0) * min(wp*1.3, 1.0)
 
 def smart_future_pick(available, rounds_remaining):
-    """
-    Pick the best team for a future sim round using seed-saving logic.
-    Instead of always grabbing the highest win-prob (which is always a 1-seed),
-    this models how a SMART player would actually play a survivor pool.
-    """
-    if not available:
-        return None
-
-    if rounds_remaining <= 1:
-        # Last round: use your best team
-        return max(available, key=lambda x: x["win_prob"])
-
+    if not available: return None
+    if rounds_remaining <= 1: return max(available, key=lambda x: x["win_prob"])
     if rounds_remaining > 3:
-        # Early/mid tournament: avoid 1-seeds and 2-seeds if possible
-        mid_tier = [t for t in available if (t.get("seed") or 99) > 2]
-        if mid_tier:
-            return max(mid_tier, key=lambda x: x["win_prob"])
-
+        mid = [t for t in available if (t.get("seed") or 99) > 2]
+        if mid: return max(mid, key=lambda x: x["win_prob"])
     if rounds_remaining > 1:
-        # Mid tournament: avoid 1-seeds only
         non_top = [t for t in available if (t.get("seed") or 99) > 1]
-        if non_top:
-            return max(non_top, key=lambda x: x["win_prob"])
-
-    # Fallback: use whatever is best
+        if non_top: return max(non_top, key=lambda x: x["win_prob"])
     return max(available, key=lambda x: x["win_prob"])
 
-def sim_survivor(pick, avail_today, future_days, n, rd_idx, total_rds, used,
-                 pick_counts, total_entries):
-    """
-    Monte Carlo with SMART future play.
-    Future rounds use seed-aware strategy instead of pure greedy.
-    """
+def sim_survivor(pick, avail_today, future_days, n, rd_idx, total_rds, used, pick_counts, total_entries):
     today_map = {t["team"]: t["win_prob"] for t in avail_today}
     if pick not in today_map: return 0.0
-
     survivals = 0
     for _ in range(n):
         ok = True; su = set(used); su.add(pick)
-
-        # Today
-        if np.random.random() >= today_map[pick]:
-            ok = False
+        if np.random.random() >= today_map[pick]: ok = False
         elif future_days:
-            # Future rounds: smart play
             for fi, ft in enumerate(future_days):
-                rr = total_rds - (rd_idx + 1 + fi)  # rounds remaining after this future day
+                rr = total_rds - (rd_idx + 1 + fi)
                 av = [t for t in ft if t["team"] not in su]
-                if not av:
-                    ok = False; break
+                if not av: ok = False; break
                 best = smart_future_pick(av, rr)
-                if best is None:
-                    ok = False; break
+                if best is None: ok = False; break
                 su.add(best["team"])
-                if np.random.random() >= best["win_prob"]:
-                    ok = False; break
-
+                if np.random.random() >= best["win_prob"]: ok = False; break
         if ok: survivals += 1
-
     return survivals / max(n, 1)
 
-def compute_safety_score(wp, future_value, survival):
-    """
-    SAFETY PICK: Maximize today's survival while preserving future assets.
+def compute_safety_score(wp, fv, survival):
+    return wp * (1.0 - 0.7*fv) * (0.3 + 0.7*survival)
 
-    Formula: win_prob × (1 - 0.7 × future_value) × (0.3 + 0.7 × survival)
+def compute_leverage_score(wp, opp_pct, fv, survival):
+    return ((1.0 - opp_pct)**0.6) * wp * (1.0 - 0.5*fv) * (survival**0.5 if survival > 0 else 0)
 
-    - Heavily penalizes burning high-FV teams (70% discount on future value)
-    - Still requires decent win probability
-    - Survival provides a bonus but isn't dominant
-
-    Examples (Round 1):
-      Duke (99% wp, 0.95 FV, 85% surv) = 0.99 × 0.335 × 0.895 = 0.297
-      Louisville (72% wp, 0.10 FV, 80% surv) = 0.72 × 0.930 × 0.860 = 0.576
-      → Louisville wins. That's correct.
-    """
-    fv_penalty = 1.0 - 0.7 * future_value
-    surv_factor = 0.3 + 0.7 * survival
-    return wp * fv_penalty * surv_factor
-
-def compute_leverage_score(wp, opp_pct, future_value, survival):
-    """
-    LEVERAGE PICK: Maximize contrarian edge while staying +EV.
-
-    Formula: (1 - opp_pct)^0.6 × win_prob × (1 - 0.5 × future_value) × survival^0.5
-
-    - Contrarian value is key (but sub-linear — 1% vs 5% matters less than 5% vs 20%)
-    - Still requires solid win probability
-    - Moderate future-value penalty (50% discount — willing to burn mid-seeds for big edge)
-    - Survival has diminishing returns (square root)
-
-    Examples (Round 1):
-      Ohio State (59% wp, 12% opp, 0.0 FV, 70% surv) = 0.917 × 0.59 × 1.0 × 0.837 = 0.453
-      Duke (99% wp, 2% opp, 0.95 FV, 85% surv) = 0.988 × 0.99 × 0.525 × 0.922 = 0.473
-      Louisville (72% wp, 8% opp, 0.10 FV, 80% surv) = 0.951 × 0.72 × 0.95 × 0.894 = 0.582
-      → Louisville wins leverage too. 8v9 games are viable contrarian plays.
-    """
-    contrarian = (1.0 - opp_pct) ** 0.6
-    fv_penalty = 1.0 - 0.5 * future_value
-    surv_factor = survival ** 0.5 if survival > 0 else 0
-    return contrarian * wp * fv_penalty * surv_factor
-
-# Minimum win probability thresholds
-MIN_WP_SAFETY = 0.55     # Don't recommend safety picks below 55%
-MIN_WP_LEVERAGE = 0.50   # Leverage can go slightly lower for big contrarian edge
+MIN_WP_SAFETY = 0.55
+MIN_WP_LEVERAGE = 0.50
 
 # ═══════════════════════════════════════════════════════════
-#  SESSION STATE INIT — Load from disk first, then defaults
+#  SESSION STATE INIT
 # ═══════════════════════════════════════════════════════════
 if "state_loaded" not in st.session_state:
     saved = load_state()
     if saved:
-        for k in PERSISTED_KEYS:
-            if k in saved:
-                st.session_state[k] = saved[k]
+        if "contests" in saved:
+            st.session_state.contests = saved["contests"]
+            st.session_state.active_contest = saved.get("active_contest", "contest_1")
+            for k in SHARED_KEYS:
+                if k in saved.get("shared", {}): st.session_state[k] = saved["shared"][k]
+        else:
+            # Legacy migration
+            legacy = {k: saved[k] for k in CONTEST_KEYS if k in saved}
+            if "contest_name" not in legacy: legacy["contest_name"] = "Contest 1"
+            st.session_state.contests = {"contest_1": legacy}
+            st.session_state.active_contest = "contest_1"
+            for k in SHARED_KEYS:
+                if k in saved: st.session_state[k] = saved[k]
     st.session_state.state_loaded = True
 
-defaults = {
-    "total_entries": 900, "my_entries": 3, "n_sims": 1000,
-    "current_day_idx": 0, "spread_overrides": {}, "sim_results": None,
-    "manual_winners": {},
-    "pick_counts": {},      # key: "day|team" -> int
-    "my_picks": {},         # key: "entry_num|day" -> team name
-}
-for k, v in defaults.items():
+# Apply defaults
+if "contests" not in st.session_state:
+    st.session_state.contests = {k: dict(v) for k, v in DEFAULT_CONTESTS.items()}
+if "active_contest" not in st.session_state:
+    st.session_state.active_contest = "contest_1"
+for k, v in [("n_sims", 1000), ("current_day_idx", 0), ("spread_overrides", {}),
+             ("manual_winners", {}), ("sim_results", None)]:
     if k not in st.session_state: st.session_state[k] = v
 if "used_teams" not in st.session_state:
-    st.session_state.used_teams = {i: set() for i in range(1, 4)}
+    st.session_state.used_teams = {}
+
+# Active contest shortcut
+C = ctx()
 
 # ═══════════════════════════════════════════════════════════
 #  FETCH & BUILD LIVE BRACKET
@@ -572,17 +449,13 @@ if "used_teams" not in st.session_state:
 with st.spinner("📡 Fetching ESPN results..."):
     espn_results = fetch_all()
     api_winners, api_losers = match_results(espn_results, FIRST_ROUND)
-
 all_winners = {**api_winners, **st.session_state.manual_winners}
 live_bracket = build_bracket(all_winners)
-
-# Match later rounds too
 later = {gid:g for gid,g in live_bracket.items() if g.get("teams_known") and gid not in FIRST_ROUND}
 if later:
     lw, ll = match_results(espn_results, later)
     all_winners.update(lw); api_losers.update(ll)
     live_bracket = build_bracket(all_winners)
-
 eliminated = set(api_losers.values())
 for gid in BRACKET_TREE:
     if gid in all_winners:
@@ -591,25 +464,70 @@ for gid in BRACKET_TREE:
             w = all_winners[gid]
             if g["team_a"]!=w and "W(" not in g["team_a"]: eliminated.add(g["team_a"])
             if g["team_b"]!=w and "W(" not in g["team_b"]: eliminated.add(g["team_b"])
-
 ALL_TEAMS = get_all_teams()
 current_day = TOURNAMENT_DAYS[st.session_state.current_day_idx]
 
-# Helper: get espn live info for a matchup
 def get_live_info(ta, tb):
     for dr in espn_results.values():
         for r in dr:
-            if (r["team_a"]==ta or r["team_b"]==ta) and (r["team_a"]==tb or r["team_b"]==tb):
-                return r
+            if (r["team_a"]==ta or r["team_b"]==ta) and (r["team_a"]==tb or r["team_b"]==tb): return r
     return None
 
 # ═══════════════════════════════════════════════════════════
 #  SIDEBAR
 # ═══════════════════════════════════════════════════════════
 with st.sidebar:
-    st.markdown("## ⚙️ Settings")
-    st.session_state.total_entries = st.number_input("Pool entries remaining", 1, 10000, st.session_state.total_entries, 1)
-    st.session_state.my_entries = st.number_input("My entries remaining", 0, 10, st.session_state.my_entries, 1)
+    # ── CONTEST SWITCHER (top of sidebar) ──
+    st.markdown("## 🏆 Contest")
+    contest_ids = list(st.session_state.contests.keys())
+    contest_labels = {cid: st.session_state.contests[cid].get("contest_name", cid) for cid in contest_ids}
+
+    selected_cid = st.selectbox("Active contest", contest_ids,
+        index=contest_ids.index(st.session_state.active_contest) if st.session_state.active_contest in contest_ids else 0,
+        format_func=lambda x: f"{contest_labels[x]} ({st.session_state.contests[x].get('total_entries', '?')} entries)",
+        key="contest_selector")
+
+    if selected_cid != st.session_state.active_contest:
+        st.session_state.active_contest = selected_cid
+        st.session_state.sim_results = None
+        st.rerun()
+
+    C = ctx()  # Refresh after potential switch
+
+    # Contest name editor
+    new_name = st.text_input("Contest name", value=C.get("contest_name", ""), key="cname_input")
+    if new_name != C.get("contest_name", ""):
+        C["contest_name"] = new_name
+
+    # Add / remove contests
+    col_add, col_del = st.columns(2)
+    with col_add:
+        if st.button("➕ Add Contest", use_container_width=True):
+            new_id = f"contest_{len(st.session_state.contests)+1}"
+            while new_id in st.session_state.contests:
+                new_id += "_"
+            st.session_state.contests[new_id] = {
+                "contest_name": f"Contest {len(st.session_state.contests)+1}",
+                "total_entries": 100, "my_entries": 1, "pick_counts": {}, "my_picks": {}
+            }
+            st.session_state.active_contest = new_id
+            st.session_state.sim_results = None
+            st.rerun()
+    with col_del:
+        if len(st.session_state.contests) > 1:
+            if st.button("🗑️ Remove", use_container_width=True):
+                del st.session_state.contests[st.session_state.active_contest]
+                st.session_state.active_contest = list(st.session_state.contests.keys())[0]
+                st.session_state.sim_results = None
+                st.rerun()
+
+    st.markdown("---")
+    st.markdown("## ⚙️ Contest Settings")
+    C["total_entries"] = st.number_input("Pool entries remaining", 1, 50000, C.get("total_entries", 900), 1)
+    C["my_entries"] = st.number_input("My entries remaining", 0, 20, C.get("my_entries", 3), 1)
+
+    st.markdown("---")
+    st.markdown("## 🔬 Sim Settings")
     st.session_state.n_sims = st.number_input("Sims per pick", 100, 50000, st.session_state.n_sims, 100)
 
     st.markdown("---")
@@ -634,71 +552,42 @@ with st.sidebar:
         if st.button("Set"): st.session_state.manual_winners[og] = ow; st.rerun()
 
     st.markdown("---")
-    st.markdown("## 💾 Save / Load Data")
-
-    # Auto-save status
+    st.markdown("## 💾 Save / Load")
     if os.path.exists(SAVE_FILE):
         mod_time = datetime.fromtimestamp(os.path.getmtime(SAVE_FILE))
         st.caption(f"Last saved: {mod_time.strftime('%b %d, %I:%M %p')}")
-    else:
-        st.caption("No save file yet")
-
-    # Manual save button
     if st.button("💾 Save Now", use_container_width=True):
-        if save_state():
-            st.success("Saved!")
-        else:
-            st.error("Save failed")
-
-    # Export for portability (Streamlit Cloud, new machine, etc.)
+        if save_state(): st.success("Saved!")
     export_json = export_state_json()
-    st.download_button(
-        "📤 Export Data (JSON)",
-        data=export_json,
+    st.download_button("📤 Export All Contests", data=export_json,
         file_name=f"survivor_state_{date.today().strftime('%Y%m%d')}.json",
-        mime="application/json",
-        use_container_width=True,
-    )
-
-    # Import
-    uploaded = st.file_uploader("📥 Import Data (JSON)", type=["json"], key="import_file")
+        mime="application/json", use_container_width=True)
+    uploaded = st.file_uploader("📥 Import", type=["json"], key="import_file")
     if uploaded is not None:
-        content = uploaded.read().decode("utf-8")
-        if import_state_json(content):
-            st.success("Imported! Refreshing...")
-            st.rerun()
-        else:
-            st.error("Invalid file format")
-
-    # Reset button
+        if import_state_json(uploaded.read().decode("utf-8")):
+            st.success("Imported!"); st.rerun()
     if st.button("🗑️ Reset All Data", use_container_width=True):
         st.session_state.confirm_reset = True
-
     if st.session_state.get("confirm_reset"):
-        st.warning("This will erase all picks, spreads, and settings.")
-        col_y, col_n = st.columns(2)
-        with col_y:
+        st.warning("Erase ALL contests and settings?")
+        cy, cn = st.columns(2)
+        with cy:
             if st.button("Yes, reset"):
-                for k in PERSISTED_KEYS:
-                    if k in st.session_state: del st.session_state[k]
+                for k in list(st.session_state.keys()): del st.session_state[k]
                 if os.path.exists(SAVE_FILE): os.remove(SAVE_FILE)
-                st.session_state.state_loaded = False
-                st.session_state.confirm_reset = False
                 st.rerun()
-        with col_n:
-            if st.button("Cancel"):
-                st.session_state.confirm_reset = False
-                st.rerun()
+        with cn:
+            if st.button("Cancel"): st.session_state.confirm_reset = False; st.rerun()
 
 # ═══════════════════════════════════════════════════════════
-#  MAIN
+#  MAIN — Header with contest name
 # ═══════════════════════════════════════════════════════════
 st.title("🏀 March Madness Survivor Engine")
-c1,c2,c3,c4,c5 = st.columns(5)
+st.markdown(f"### 🏆 {C.get('contest_name', 'Contest')} — {C.get('total_entries', 0)} entries · {C.get('my_entries', 0)} of mine")
+
+c1,c2,c3,c4 = st.columns(4)
 c1.metric("Day", current_day); c2.metric("Round", ROUND_NAMES[current_day])
-c3.metric("Pool Size", st.session_state.total_entries)
-c4.metric("My Entries", st.session_state.my_entries)
-c5.metric("Eliminated", len(eliminated))
+c3.metric("Pool Size", C.get("total_entries", 0)); c4.metric("Eliminated", len(eliminated))
 
 tab_games, tab_picks, tab_sweat, tab_recs, tab_bracket, tab_detail = st.tabs([
     "📋 Games & Spreads", "📊 Pick Tracking", "🔥 Sweat Board",
@@ -706,7 +595,7 @@ tab_games, tab_picks, tab_sweat, tab_recs, tab_bracket, tab_detail = st.tabs([
 ])
 
 # ═══════════════════════════════════════════════════════════
-#  TAB 1: GAMES & SPREADS
+#  TAB 1: GAMES & SPREADS (shared — spreads don't change between contests)
 # ═══════════════════════════════════════════════════════════
 with tab_games:
     st.markdown(f"### {current_day} — {ROUND_NAMES[current_day]}")
@@ -718,12 +607,10 @@ with tab_games:
             cs = st.session_state.spread_overrides.get(ok, g.get("spread"))
             fe = "🔴" if ta in eliminated else ("🏆" if gid in all_winners and all_winners[gid]==ta else "🟢")
             de = "🔴" if tb in eliminated else ("🏆" if gid in all_winners and all_winners[gid]==tb else "🟢")
-            live = get_live_info(ta, tb)
-            ls = ""
+            live = get_live_info(ta, tb); ls = ""
             if live:
                 if live["is_live"]: ls = f" 🔴 LIVE {live['score_a']}-{live['score_b']} ({live['detail']})"
                 elif live["is_final"]: ls = f" ✅ FINAL {live['score_a']}-{live['score_b']}"
-
             x1,x2,x3 = st.columns([1,3,2])
             with x1: st.markdown(f"**{g.get('time','TBD')}**"); st.caption(g.get("loc","TBD"))
             with x2:
@@ -738,593 +625,302 @@ with tab_games:
                 bar = f'<div style="display:flex;height:20px;border-radius:4px;overflow:hidden;font-size:11px"><div style="width:{wp_*100:.0f}%;background:#2ecc71;color:white;text-align:center;font-weight:bold">{ta[:10]} {wp_:.0%}</div><div style="width:{(1-wp_)*100:.0f}%;background:#e74c3c;color:white;text-align:center;font-weight:bold">{tb[:10]} {1-wp_:.0%}</div></div>'
                 st.markdown(bar, unsafe_allow_html=True)
             st.markdown("---")
-    else:
-        st.info("No games for this day yet.")
+    else: st.info("No games for this day yet.")
 
 # ═══════════════════════════════════════════════════════════
-#  TAB 2: PICK TRACKING
+#  TAB 2: PICK TRACKING (per-contest)
 # ═══════════════════════════════════════════════════════════
 with tab_picks:
-    st.markdown("### 📊 Pick Tracking — Enter Actual Pool Pick Counts")
-    st.markdown("Enter the number of entries that picked each team for each day. "
-                "This overrides the modeled opponent behavior with **real data**.")
-
+    st.markdown(f"### 📊 Pick Tracking — {C.get('contest_name', 'Contest')}")
     pick_tab_day = st.selectbox("Day to enter picks for", TOURNAMENT_DAYS,
-                                 index=st.session_state.current_day_idx,
-                                 format_func=lambda x: f"{x} — {ROUND_NAMES[x]}",
-                                 key="pick_tab_day")
-
+        index=st.session_state.current_day_idx,
+        format_func=lambda x: f"{x} — {ROUND_NAMES[x]}", key="pick_tab_day")
     day_games = {gid:g for gid,g in live_bracket.items() if g.get("day")==pick_tab_day}
-
+    pc = C.get("pick_counts", {})
     if day_games:
         st.markdown("#### Pool Pick Counts")
         for gid, g in sorted(day_games.items(), key=lambda x: x[1].get("time","")):
             ta, tb = g["team_a"], g["team_b"]
             if "W(" in ta or "W(" in tb: continue
-
             sas = f"({g['seed_a']}) " if g.get("seed_a") else ""
             sbs = f"({g['seed_b']}) " if g.get("seed_b") else ""
-
-            col_a, col_b = st.columns(2)
-            with col_a:
-                key_a = f"{pick_tab_day}|{ta}"
-                cur_a = st.session_state.pick_counts.get(key_a, 0)
-                new_a = st.number_input(f"{sas}{ta}", min_value=0,
-                    max_value=st.session_state.total_entries,
-                    value=cur_a, step=1, key=f"pc_{key_a}")
-                st.session_state.pick_counts[key_a] = new_a
-            with col_b:
-                key_b = f"{pick_tab_day}|{tb}"
-                cur_b = st.session_state.pick_counts.get(key_b, 0)
-                new_b = st.number_input(f"{sbs}{tb}", min_value=0,
-                    max_value=st.session_state.total_entries,
-                    value=cur_b, step=1, key=f"pc_{key_b}")
-                st.session_state.pick_counts[key_b] = new_b
-
-        # Summary for this day
+            ca, cb = st.columns(2)
+            with ca:
+                ka = f"{pick_tab_day}|{ta}"
+                na = st.number_input(f"{sas}{ta}", 0, C["total_entries"], pc.get(ka,0), 1, key=f"pc_{ka}")
+                pc[ka] = na
+            with cb:
+                kb = f"{pick_tab_day}|{tb}"
+                nb = st.number_input(f"{sbs}{tb}", 0, C["total_entries"], pc.get(kb,0), 1, key=f"pc_{kb}")
+                pc[kb] = nb
+        C["pick_counts"] = pc
         st.markdown("---")
-        st.markdown("#### Pick Summary")
-        total_today = sum(st.session_state.pick_counts.get(f"{pick_tab_day}|{t}", 0) for t in ALL_TEAMS)
-        st.metric("Total picks entered for this day", total_today)
-        if total_today > 0 and total_today != st.session_state.total_entries:
-            st.warning(f"Total picks ({total_today}) doesn't match pool entries ({st.session_state.total_entries}). "
-                       "This is fine if not all teams have picks or if some entries were already eliminated.")
-
-        # Show pick distribution
+        total_today = sum(pc.get(f"{pick_tab_day}|{t}", 0) for t in ALL_TEAMS)
+        st.metric("Total picks entered", total_today)
+        if total_today > 0 and total_today != C["total_entries"]:
+            st.warning(f"Total ({total_today}) ≠ pool size ({C['total_entries']}). Fine if some entries already eliminated.")
         pick_data = []
         for gid, g in sorted(day_games.items(), key=lambda x: x[1].get("time","")):
             ta, tb = g["team_a"], g["team_b"]
             if "W(" in ta: continue
-            cnt_a = st.session_state.pick_counts.get(f"{pick_tab_day}|{ta}", 0)
-            cnt_b = st.session_state.pick_counts.get(f"{pick_tab_day}|{tb}", 0)
-            tot = max(total_today, 1)
-            pick_data.append({"Team": ta, "Seed": g.get("seed_a"), "Picks": cnt_a,
-                              "Pick%": f"{cnt_a/tot:.1%}", "Opponent": tb})
-            pick_data.append({"Team": tb, "Seed": g.get("seed_b"), "Picks": cnt_b,
-                              "Pick%": f"{cnt_b/tot:.1%}", "Opponent": ta})
-        if pick_data:
-            st.dataframe(pd.DataFrame(pick_data).sort_values("Picks", ascending=False),
-                         use_container_width=True, hide_index=True)
-    else:
-        st.info("No games for this day yet.")
+            for t, s in [(ta, g.get("seed_a")), (tb, g.get("seed_b"))]:
+                cnt = pc.get(f"{pick_tab_day}|{t}", 0)
+                pick_data.append({"Team":t,"Seed":s,"Picks":cnt,
+                    "Pick%":f"{cnt/max(total_today,1):.1%}","Opponent":tb if t==ta else ta})
+        if pick_data: st.dataframe(pd.DataFrame(pick_data).sort_values("Picks",ascending=False), use_container_width=True, hide_index=True)
+    else: st.info("No games for this day yet.")
 
-    # ── MY PICKS SECTION ──
+    # My Picks
     st.markdown("---")
-    st.markdown("### 🎯 My Picks — Mark Your Selections")
-    st.markdown("Select which team you picked for each entry on each day. "
-                "Used teams are automatically tracked and crossed out on future days.")
-
-    for en in range(1, st.session_state.my_entries + 1):
+    st.markdown(f"### 🎯 My Picks — {C.get('contest_name','')}")
+    mp = C.get("my_picks", {})
+    for en in range(1, C.get("my_entries", 0) + 1):
         st.markdown(f"#### Entry #{en}")
         cols = st.columns(min(len(TOURNAMENT_DAYS), 5))
         for i, day in enumerate(TOURNAMENT_DAYS):
-            col = cols[i % len(cols)]
-            with col:
+            with cols[i % len(cols)]:
                 pick_key = f"{en}|{day}"
-                day_games_for_pick = {gid:g for gid,g in live_bracket.items() if g.get("day")==day}
-
-                # Get available teams for this day (not already used by this entry)
+                dgp = {gid:g for gid,g in live_bracket.items() if g.get("day")==day}
                 used_prior = set()
-                for prev_day in TOURNAMENT_DAYS:
-                    if prev_day == day: break
-                    pk = f"{en}|{prev_day}"
-                    if pk in st.session_state.my_picks and st.session_state.my_picks[pk]:
-                        used_prior.add(st.session_state.my_picks[pk])
-
+                for pd_day in TOURNAMENT_DAYS:
+                    if pd_day == day: break
+                    pk = f"{en}|{pd_day}"
+                    if mp.get(pk): used_prior.add(mp[pk])
                 teams_today = []
-                for g in day_games_for_pick.values():
+                for g in dgp.values():
                     for t in [g["team_a"], g["team_b"]]:
-                        if "W(" not in t and "/" not in t and t not in eliminated:
-                            teams_today.append(t)
-
+                        if "W(" not in t and "/" not in t and t not in eliminated: teams_today.append(t)
                 options = ["—"] + [t for t in sorted(teams_today) if t not in used_prior]
-
-                # Preserve existing pick even if team was later eliminated
-                # (can't un-pick a past day, and the dropdown shouldn't lose your selection)
-                current = st.session_state.my_picks.get(pick_key, "—")
-                if current and current != "—" and current not in options:
-                    options.append(current)
-                if current not in options: current = "—"
-
-                sel = st.selectbox(f"{day}", options, index=options.index(current),
-                                    key=f"mypick_{pick_key}")
-                st.session_state.my_picks[pick_key] = sel if sel != "—" else ""
-
-        # Update used_teams from my_picks
+                cur = mp.get(pick_key, "—")
+                if cur and cur != "—" and cur not in options: options.append(cur)
+                if cur not in options: cur = "—"
+                sel = st.selectbox(f"{day}", options, index=options.index(cur), key=f"mp_{st.session_state.active_contest}_{pick_key}")
+                mp[pick_key] = sel if sel != "—" else ""
+        # Update used_teams
         used = set()
         for day in TOURNAMENT_DAYS:
-            pk = f"{en}|{day}"
-            if pk in st.session_state.my_picks and st.session_state.my_picks[pk]:
-                used.add(st.session_state.my_picks[pk])
-        st.session_state.used_teams[en] = used
+            if mp.get(f"{en}|{day}"): used.add(mp[f"{en}|{day}"])
+        st.session_state.used_teams[f"{st.session_state.active_contest}_{en}"] = used
+    C["my_picks"] = mp
 
-    # ── TEAM AVAILABILITY TRACKER ──
+    # Availability tracker
     st.markdown("---")
     st.markdown("### 📈 Entries Still Available Per Team")
-    st.markdown("Based on actual pick data entered above, how many pool entries still have each team available?")
-
-    avail_day = st.selectbox("Check availability as of", TOURNAMENT_DAYS,
-                              index=st.session_state.current_day_idx,
-                              format_func=lambda x: f"{x} — {ROUND_NAMES[x]}",
-                              key="avail_day")
+    avail_day = st.selectbox("As of", TOURNAMENT_DAYS, index=st.session_state.current_day_idx,
+        format_func=lambda x: f"{x} — {ROUND_NAMES[x]}", key="avail_day")
     avail_idx = TOURNAMENT_DAYS.index(avail_day)
-
     avail_rows = []
     for team in ALL_TEAMS:
         if team in eliminated: continue
         seed = get_team_seed(team)
-        total_used = 0
-        for d_i in range(avail_idx):
-            d = TOURNAMENT_DAYS[d_i]
-            total_used += st.session_state.pick_counts.get(f"{d}|{team}", 0)
-        remaining = max(st.session_state.total_entries - total_used, 0)
-        pct_avail = remaining / max(st.session_state.total_entries, 1)
-        avail_rows.append({"Team": team, "Seed": seed, "Times Picked": total_used,
-                           "Entries Still Have": remaining,
-                           "% Available": f"{pct_avail:.1%}"})
-
-    if avail_rows:
-        df_avail = pd.DataFrame(avail_rows).sort_values("Times Picked", ascending=False)
-        st.dataframe(df_avail, use_container_width=True, hide_index=True)
-
+        total_used = sum(pc.get(f"{TOURNAMENT_DAYS[d]}|{team}", 0) for d in range(avail_idx))
+        remaining = max(C["total_entries"] - total_used, 0)
+        avail_rows.append({"Team":team,"Seed":seed,"Times Picked":total_used,
+            "Entries Still Have":remaining,"% Available":f"{remaining/max(C['total_entries'],1):.1%}"})
+    if avail_rows: st.dataframe(pd.DataFrame(avail_rows).sort_values("Times Picked",ascending=False), use_container_width=True, hide_index=True)
 
 # ═══════════════════════════════════════════════════════════
-#  TAB 3: SWEAT BOARD
+#  TAB 3: SWEAT BOARD (per-contest)
 # ═══════════════════════════════════════════════════════════
 with tab_sweat:
-    st.markdown("### 🔥 Sweat Board — Live Scores + Pick %")
-    st.markdown("Your picks are **highlighted in green**. Eliminated teams are crossed out.")
-
+    st.markdown(f"### 🔥 Sweat Board — {C.get('contest_name','')}")
     sweat_day = st.selectbox("Day", TOURNAMENT_DAYS, index=st.session_state.current_day_idx,
-                              format_func=lambda x: f"{x} — {ROUND_NAMES[x]}",
-                              key="sweat_day")
-
-    # Collect my picks for this day
+        format_func=lambda x: f"{x} — {ROUND_NAMES[x]}", key="sweat_day")
+    mp = C.get("my_picks", {})
     my_picks_today = {}
-    for en in range(1, st.session_state.my_entries + 1):
-        pk = f"{en}|{sweat_day}"
-        pick = st.session_state.my_picks.get(pk, "")
+    for en in range(1, C.get("my_entries", 0) + 1):
+        pick = mp.get(f"{en}|{sweat_day}", "")
         if pick: my_picks_today[en] = pick
-
     if my_picks_today:
-        st.markdown("**My picks today:** " + " | ".join(
-            [f"Entry #{en}: **{pick}**" for en, pick in my_picks_today.items()]))
-    else:
-        st.caption("No picks entered for this day yet. Go to Pick Tracking tab to set them.")
-
+        st.markdown("**My picks today:** " + " | ".join([f"Entry #{en}: **{p}**" for en, p in my_picks_today.items()]))
+    else: st.caption("No picks entered yet.")
     st.markdown("---")
     day_games = {gid:g for gid,g in live_bracket.items() if g.get("day")==sweat_day}
-
-    total_picks_day = sum(
-        st.session_state.pick_counts.get(f"{sweat_day}|{t}", 0)
-        for g in day_games.values()
-        for t in [g["team_a"], g["team_b"]]
-        if "W(" not in t
-    )
-
+    pc = C.get("pick_counts", {})
+    total_picks_day = sum(pc.get(f"{sweat_day}|{t}", 0) for g in day_games.values() for t in [g["team_a"],g["team_b"]] if "W(" not in t)
     if day_games:
         for gid, g in sorted(day_games.items(), key=lambda x: x[1].get("time","")):
             ta, tb = g["team_a"], g["team_b"]
             if "W(" in ta: continue
-
             sas = f"({g['seed_a']})" if g.get("seed_a") else ""
             sbs = f"({g['seed_b']})" if g.get("seed_b") else ""
-
-            # Pick counts
-            cnt_a = st.session_state.pick_counts.get(f"{sweat_day}|{ta}", 0)
-            cnt_b = st.session_state.pick_counts.get(f"{sweat_day}|{tb}", 0)
+            cnt_a = pc.get(f"{sweat_day}|{ta}", 0); cnt_b = pc.get(f"{sweat_day}|{tb}", 0)
             pct_a = f"{cnt_a/max(total_picks_day,1):.1%}" if total_picks_day > 0 else "—"
             pct_b = f"{cnt_b/max(total_picks_day,1):.1%}" if total_picks_day > 0 else "—"
-
-            # Is this my pick?
-            my_pick_entries_a = [en for en, pk in my_picks_today.items() if pk == ta]
-            my_pick_entries_b = [en for en, pk in my_picks_today.items() if pk == tb]
-            is_mine_a = len(my_pick_entries_a) > 0
-            is_mine_b = len(my_pick_entries_b) > 0
-
-            # Status
+            mpa = [en for en, pk in my_picks_today.items() if pk == ta]
+            mpb = [en for en, pk in my_picks_today.items() if pk == tb]
             live = get_live_info(ta, tb)
-            score_a = score_b = "—"
-            status_text = "🔜 Upcoming"
+            score_a = score_b = "—"; status_text = "🔜 Upcoming"
             if live:
                 score_a = str(live["score_a"]); score_b = str(live["score_b"])
                 if live["is_live"]: status_text = f"🔴 {live['detail']}"
                 elif live["is_final"]: status_text = "✅ FINAL"
-
-            is_elim_a = ta in eliminated
-            is_elim_b = tb in eliminated
-            won_a = gid in all_winners and all_winners[gid] == ta
-            won_b = gid in all_winners and all_winners[gid] == tb
-
-            # Build styled HTML for each team
-            def team_html(team, seed_str, cnt, pct, is_mine, is_elim, won, score, entries_list):
+            ea = ta in eliminated; eb = tb in eliminated
+            wa = gid in all_winners and all_winners[gid]==ta
+            wb = gid in all_winners and all_winners[gid]==tb
+            def th(team, ss, cnt, pct, mine, elim, won, score, elist):
                 bg = ""
-                if is_mine and won:
-                    bg = "background: linear-gradient(90deg, #27ae60 0%, #2ecc71 100%); color: white;"
-                elif is_mine and is_elim:
-                    bg = "background: linear-gradient(90deg, #c0392b 0%, #e74c3c 100%); color: white;"
-                elif is_mine:
-                    bg = "background: linear-gradient(90deg, #2980b9 0%, #3498db 100%); color: white;"
-
-                text_decor = "text-decoration: line-through; opacity: 0.5;" if is_elim else ""
-                icon = "🏆" if won else ("❌" if is_elim else "")
-                mine_badge = ""
-                if is_mine:
-                    entry_nums = ", ".join([f"#{e}" for e in entries_list])
-                    mine_badge = f'<span style="background:#f39c12;color:white;padding:1px 6px;border-radius:10px;font-size:10px;margin-left:4px">MY PICK {entry_nums}</span>'
-
-                return f'''<div style="padding:8px 12px;border-radius:6px;margin:2px 0;{bg}">
-                    <div style="display:flex;justify-content:space-between;align-items:center;">
-                        <span style="font-weight:bold;font-size:16px;{text_decor}">{icon} {seed_str} {team}{mine_badge}</span>
-                        <span style="font-size:20px;font-weight:bold">{score}</span>
-                    </div>
-                    <div style="font-size:12px;opacity:0.8">Picks: {cnt} ({pct})</div>
-                </div>'''
-
-            html = f'''<div style="border:1px solid #333;border-radius:8px;padding:8px;margin-bottom:12px;">
-                <div style="text-align:center;font-size:11px;color:#888;margin-bottom:4px">{g.get("time","TBD")} · {g.get("loc","TBD")} · {status_text}</div>
-                {team_html(ta, sas, cnt_a, pct_a, is_mine_a, is_elim_a, won_a, score_a, my_pick_entries_a)}
-                {team_html(tb, sbs, cnt_b, pct_b, is_mine_b, is_elim_b, won_b, score_b, my_pick_entries_b)}
-            </div>'''
+                if mine and won: bg="background:linear-gradient(90deg,#27ae60,#2ecc71);color:white;"
+                elif mine and elim: bg="background:linear-gradient(90deg,#c0392b,#e74c3c);color:white;"
+                elif mine: bg="background:linear-gradient(90deg,#2980b9,#3498db);color:white;"
+                td = "text-decoration:line-through;opacity:0.5;" if elim else ""
+                ic = "🏆" if won else ("❌" if elim else "")
+                mb = ""
+                if mine: mb=f'<span style="background:#f39c12;color:white;padding:1px 6px;border-radius:10px;font-size:10px;margin-left:4px">MY PICK {", ".join(f"#{e}" for e in elist)}</span>'
+                return f'<div style="padding:8px 12px;border-radius:6px;margin:2px 0;{bg}"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:bold;font-size:16px;{td}">{ic} {ss} {team}{mb}</span><span style="font-size:20px;font-weight:bold">{score}</span></div><div style="font-size:12px;opacity:0.8">Picks: {cnt} ({pct})</div></div>'
+            html = f'<div style="border:1px solid #333;border-radius:8px;padding:8px;margin-bottom:12px"><div style="text-align:center;font-size:11px;color:#888;margin-bottom:4px">{g.get("time","TBD")} · {g.get("loc","TBD")} · {status_text}</div>{th(ta,sas,cnt_a,pct_a,len(mpa)>0,ea,wa,score_a,mpa)}{th(tb,sbs,cnt_b,pct_b,len(mpb)>0,eb,wb,score_b,mpb)}</div>'
             st.markdown(html, unsafe_allow_html=True)
-    else:
-        st.info("No games for this day yet.")
-
-    # Survival summary
+    else: st.info("No games for this day yet.")
     st.markdown("---")
     st.markdown("### 📊 Entry Survival Status")
-    for en in range(1, st.session_state.my_entries + 1):
-        alive = True
-        picks_made = []
+    for en in range(1, C.get("my_entries", 0) + 1):
+        alive = True; picks_made = []
         for day in TOURNAMENT_DAYS:
-            pk = f"{en}|{day}"
-            pick = st.session_state.my_picks.get(pk, "")
+            pick = mp.get(f"{en}|{day}", "")
             if pick:
-                won = pick not in eliminated
                 lost = pick in eliminated
-                status = "✅" if won else "❌"
-                picks_made.append(f"{status} {day}: {pick}")
+                picks_made.append(f"{'❌' if lost else '✅'} {day}: {pick}")
                 if lost: alive = False
-
-        status_icon = "🟢 ALIVE" if alive else "🔴 ELIMINATED"
-        st.markdown(f"**Entry #{en} — {status_icon}**")
-        if picks_made:
-            st.caption(" | ".join(picks_made))
-        else:
-            st.caption("No picks made yet")
-
+        st.markdown(f"**Entry #{en} — {'🟢 ALIVE' if alive else '🔴 ELIMINATED'}**")
+        st.caption(" | ".join(picks_made) if picks_made else "No picks made yet")
 
 # ═══════════════════════════════════════════════════════════
-#  TAB 4: RECOMMENDATIONS
+#  TAB 4: RECOMMENDATIONS (per-contest)
 # ═══════════════════════════════════════════════════════════
 with tab_recs:
-    st.markdown("### 🎯 Pick Recommendations")
-    st.markdown("Two picks per entry: **🛡️ Safety** (survive today, preserve future assets) "
-                "and **⚡ Leverage** (maximum contrarian edge while staying +EV)")
-
+    st.markdown(f"### 🎯 Recommendations — {C.get('contest_name','')}")
+    st.markdown("**🛡️ Safety** (survive today, preserve assets) and **⚡ Leverage** (contrarian edge, +EV)")
     tg = {gid:g for gid,g in live_bracket.items() if g.get("day")==current_day}
+    pc = C.get("pick_counts", {}); mp = C.get("my_picks", {})
     if tg:
         at = []
         for gid, g in tg.items():
-            ok=f"spread_{gid}"; sp=st.session_state.spread_overrides.get(ok, g.get("spread") or 0)
-            wp_=win_prob(sp)
+            ok=f"spread_{gid}"; sp=st.session_state.spread_overrides.get(ok, g.get("spread") or 0); wp_=win_prob(sp)
             if g["team_a"] not in eliminated and "W(" not in g["team_a"]:
-                at.append({"team":g["team_a"],"seed":g.get("seed_a"),"win_prob":wp_,
-                           "opponent":g["team_b"],"spread":sp,"region":g["region"]})
+                at.append({"team":g["team_a"],"seed":g.get("seed_a"),"win_prob":wp_,"opponent":g["team_b"],"spread":sp,"region":g["region"]})
             if g["team_b"] not in eliminated and "W(" not in g["team_b"]:
-                at.append({"team":g["team_b"],"seed":g.get("seed_b"),"win_prob":1-wp_,
-                           "opponent":g["team_a"],"spread":-sp,"region":g["region"]})
-
-        opp = compute_opp_pct_model(at, st.session_state.current_day_idx, len(TOURNAMENT_DAYS),
-                                     st.session_state.pick_counts, current_day,
-                                     st.session_state.total_entries)
-
-        has_actual = any(st.session_state.pick_counts.get(f"{current_day}|{t['team']}", 0) > 0 for t in at)
-        if has_actual:
-            st.success("✅ Using **actual pick data** for opponent modeling")
-        else:
-            st.info("📊 Using **modeled opponent behavior** (enter actual picks in Pick Tracking tab for better accuracy)")
-
-        # Build future days with SEED DATA (critical for smart future play)
+                at.append({"team":g["team_b"],"seed":g.get("seed_b"),"win_prob":1-wp_,"opponent":g["team_a"],"spread":-sp,"region":g["region"]})
+        opp = compute_opp_pct_model(at, st.session_state.current_day_idx, len(TOURNAMENT_DAYS), pc, current_day, C["total_entries"])
+        has_actual = any(pc.get(f"{current_day}|{t['team']}", 0) > 0 for t in at)
+        if has_actual: st.success("✅ Using **actual pick data**")
+        else: st.info("📊 Using **modeled opponent behavior** (enter picks in Pick Tracking for real data)")
         fdt = []
         for fi in range(st.session_state.current_day_idx+1, min(st.session_state.current_day_idx+5, len(TOURNAMENT_DAYS))):
-            fd=TOURNAMENT_DAYS[fi]; fg={gid:g for gid,g in live_bracket.items() if g.get("day")==fd}
-            fa=[]
+            fd=TOURNAMENT_DAYS[fi]; fg={gid:g for gid,g in live_bracket.items() if g.get("day")==fd}; fa=[]
             for gid,g in fg.items():
                 ok=f"spread_{gid}"; sp=st.session_state.spread_overrides.get(ok,g.get("spread") or 0); wp_=win_prob(sp)
-                if g["team_a"] not in eliminated and "W(" not in g["team_a"]:
-                    fa.append({"team":g["team_a"],"win_prob":wp_,"seed":g.get("seed_a")})
-                if g["team_b"] not in eliminated and "W(" not in g["team_b"]:
-                    fa.append({"team":g["team_b"],"win_prob":1-wp_,"seed":g.get("seed_b")})
+                if g["team_a"] not in eliminated and "W(" not in g["team_a"]: fa.append({"team":g["team_a"],"win_prob":wp_,"seed":g.get("seed_a")})
+                if g["team_b"] not in eliminated and "W(" not in g["team_b"]: fa.append({"team":g["team_b"],"win_prob":1-wp_,"seed":g.get("seed_b")})
             fdt.append(fa)
-
         if st.button("🚀 Run Simulation Engine", type="primary", use_container_width=True):
-            prog = st.progress(0, "Running...")
-            ar = {}
-            for en in range(1, st.session_state.my_entries+1):
-                used = st.session_state.used_teams.get(en, set())
-                ea = [t for t in at if t["team"] not in used]
-                res = []
+            prog = st.progress(0, "Running..."); ar = {}
+            for en in range(1, C.get("my_entries",0)+1):
+                used = st.session_state.used_teams.get(f"{st.session_state.active_contest}_{en}", set())
+                ea = [t for t in at if t["team"] not in used]; res = []
                 for idx, ti in enumerate(ea):
-                    pv = ((en-1)*len(ea)+idx)/max(st.session_state.my_entries*len(ea),1)
+                    pv = ((en-1)*len(ea)+idx)/max(C["my_entries"]*len(ea),1)
                     prog.progress(min(pv,1.0), f"Entry #{en}: {ti['team']}...")
-
-                    sv = sim_survivor(ti["team"], ea, fdt, st.session_state.n_sims,
-                                       st.session_state.current_day_idx, len(TOURNAMENT_DAYS), used,
-                                       st.session_state.pick_counts, st.session_state.total_entries)
+                    sv = sim_survivor(ti["team"], ea, fdt, st.session_state.n_sims, st.session_state.current_day_idx, len(TOURNAMENT_DAYS), used, pc, C["total_entries"])
                     op = opp.get(ti["team"], 0)
-                    fv = compute_future_value(ti["seed"], ti["win_prob"],
-                                              st.session_state.current_day_idx, len(TOURNAMENT_DAYS))
-                    avail_count = compute_entries_with_team_available(
-                        ti["team"], st.session_state.current_day_idx,
-                        st.session_state.pick_counts, st.session_state.total_entries)
-
+                    fv = compute_future_value(ti["seed"], ti["win_prob"], st.session_state.current_day_idx, len(TOURNAMENT_DAYS))
+                    ac = compute_entries_with_team_available(ti["team"], st.session_state.current_day_idx, pc, C["total_entries"])
                     safety = compute_safety_score(ti["win_prob"], fv, sv)
                     lev = compute_leverage_score(ti["win_prob"], op, fv, sv)
-
-                    res.append({"Team":ti["team"],"Seed":ti["seed"],"Region":ti["region"],
-                        "Opponent":ti["opponent"],"Spread":ti["spread"],"Win%":ti["win_prob"],
-                        "Opp Pick%":op,"Future Value":fv,"Entries Avail":avail_count,
-                        "Survival":sv,"Safety":safety,"Leverage":lev})
+                    res.append({"Team":ti["team"],"Seed":ti["seed"],"Region":ti["region"],"Opponent":ti["opponent"],"Spread":ti["spread"],"Win%":ti["win_prob"],"Opp Pick%":op,"Future Value":fv,"Entries Avail":ac,"Survival":sv,"Safety":safety,"Leverage":lev})
                 ar[en] = res
-            prog.progress(1.0, "Done!"); st.session_state.sim_results = ar; time.sleep(0.3); prog.empty()
-
+            prog.progress(1.0,"Done!"); st.session_state.sim_results = ar; time.sleep(0.3); prog.empty()
         if st.session_state.sim_results:
             for en, res in st.session_state.sim_results.items():
                 st.markdown(f"#### Entry #{en}")
-                used = st.session_state.used_teams.get(en, set())
-                if used:
-                    used_display = []
-                    for t in sorted(used):
-                        used_display.append(f"~~{t}~~" if t in eliminated else t)
-                    st.caption(f"Already used: {', '.join(used_display)}")
+                used = st.session_state.used_teams.get(f"{st.session_state.active_contest}_{en}", set())
+                if used: st.caption(f"Already used: {', '.join('~~'+t+'~~' if t in eliminated else t for t in sorted(used))}")
                 if not res: st.warning("No teams available."); continue
-
-                # Safety picks: sorted by safety score, above wp threshold
-                safety_ranked = [r for r in res if r["Win%"] >= MIN_WP_SAFETY]
-                safety_ranked.sort(key=lambda x: x["Safety"], reverse=True)
-
-                # Leverage picks: sorted by leverage score, above wp threshold
-                lev_ranked = [r for r in res if r["Win%"] >= MIN_WP_LEVERAGE]
-                lev_ranked.sort(key=lambda x: x["Leverage"], reverse=True)
-
-                # Ensure leverage pick is DIFFERENT from safety pick
-                top_safety = safety_ranked[0] if safety_ranked else None
-                top_lev = None
-                if lev_ranked:
-                    for lp in lev_ranked:
-                        if not top_safety or lp["Team"] != top_safety["Team"]:
-                            top_lev = lp
-                            break
-                    # If all leverage picks are the same as safety, take #1 leverage anyway
-                    if top_lev is None:
-                        top_lev = lev_ranked[0]
-
-                # Also find the NEXT BEST safety (different from top safety)
-                alt_safety = None
-                if len(safety_ranked) > 1:
-                    alt_safety = safety_ranked[1]
-
-                # And next best leverage (different from both top_lev and top_safety)
-                alt_lev = None
-                for lp in lev_ranked:
-                    if lp["Team"] != (top_lev["Team"] if top_lev else "") and \
-                       lp["Team"] != (top_safety["Team"] if top_safety else ""):
-                        alt_lev = lp
-                        break
-
-                def pick_card(pick, label, color, icon, score_name, score_key):
-                    if not pick:
-                        return f'<div style="border:1px solid #555;border-radius:8px;padding:12px;opacity:0.5">No {label.lower()} pick available</div>'
-                    return f'''<div style="border:2px solid {color};border-radius:8px;padding:12px;background:rgba({",".join(str(int(color.lstrip("#")[i:i+2],16)) for i in (0,2,4))},0.1)">
-                        <div style="font-size:13px;color:{color};font-weight:bold">{icon} {label}</div>
-                        <div style="font-size:22px;font-weight:bold;margin:4px 0">({pick['Seed']}) {pick['Team']}</div>
-                        <div style="font-size:13px;opacity:0.9">vs {pick['Opponent']} · Spread: {pick['Spread']:+.1f}</div>
-                        <div style="font-size:12px;margin-top:8px;line-height:1.6">
-                            Win: <b>{pick['Win%']:.0%}</b> · 
-                            Opp Pick: <b>{pick['Opp Pick%']:.1%}</b> · 
-                            Future Value: <b>{pick['Future Value']:.2f}</b><br>
-                            Survival: <b>{pick['Survival']:.0%}</b> · 
-                            Entries Avail: <b>{pick['Entries Avail']}</b><br>
-                            <span style="font-size:14px"><b>{score_name}: {pick[score_key]:.3f}</b></span>
-                        </div>
-                    </div>'''
-
-                # ── Show top 2 picks ──
-                col_s, col_l = st.columns(2)
-                with col_s:
-                    st.markdown(pick_card(top_safety, "SAFETY PICK", "#2ecc71", "🛡️", "Safety Score", "Safety"),
-                                unsafe_allow_html=True)
-                with col_l:
-                    st.markdown(pick_card(top_lev, "LEVERAGE PICK", "#f39c12", "⚡", "Leverage Score", "Leverage"),
-                                unsafe_allow_html=True)
-
-                # Same team? Show explanation + the runner-ups
-                if top_safety and top_lev and top_safety["Team"] == top_lev["Team"]:
-                    st.info(f"🎯 Both scores converge on **{top_safety['Team']}** — very strong pick. "
-                            f"Showing distinct alternatives below.")
-                    col_a, col_b = st.columns(2)
-                    with col_a:
-                        if alt_safety and alt_safety["Team"] != top_safety["Team"]:
-                            st.markdown(pick_card(alt_safety, "SAFETY ALT", "#27ae60", "🛡️", "Safety Score", "Safety"),
-                                        unsafe_allow_html=True)
-                    with col_b:
-                        if alt_lev:
-                            st.markdown(pick_card(alt_lev, "LEVERAGE ALT", "#e67e22", "⚡", "Leverage Score", "Leverage"),
-                                        unsafe_allow_html=True)
-
-                # ── Always show runner-ups when different ──
-                elif top_safety and top_lev:
-                    with st.expander("📋 Runner-up options"):
-                        col_a, col_b = st.columns(2)
-                        with col_a:
-                            if alt_safety:
-                                st.markdown(pick_card(alt_safety, "SAFETY #2", "#27ae60", "🛡️", "Safety Score", "Safety"),
-                                            unsafe_allow_html=True)
-                        with col_b:
-                            if alt_lev:
-                                st.markdown(pick_card(alt_lev, "LEVERAGE #2", "#e67e22", "⚡", "Leverage Score", "Leverage"),
-                                            unsafe_allow_html=True)
-
-                # Full table sorted by safety
+                sr = sorted([r for r in res if r["Win%"]>=MIN_WP_SAFETY], key=lambda x: x["Safety"], reverse=True)
+                lr = sorted([r for r in res if r["Win%"]>=MIN_WP_LEVERAGE], key=lambda x: x["Leverage"], reverse=True)
+                ts = sr[0] if sr else None
+                tl = None
+                if lr:
+                    for lp in lr:
+                        if not ts or lp["Team"] != ts["Team"]: tl = lp; break
+                    if tl is None: tl = lr[0]
+                def pcard(p, label, color, icon, sn, sk):
+                    if not p: return f'<div style="border:1px solid #555;border-radius:8px;padding:12px;opacity:0.5">No {label.lower()} available</div>'
+                    return f'<div style="border:2px solid {color};border-radius:8px;padding:12px;background:rgba({",".join(str(int(color.lstrip("#")[i:i+2],16)) for i in (0,2,4))},0.1)"><div style="font-size:13px;color:{color};font-weight:bold">{icon} {label}</div><div style="font-size:22px;font-weight:bold;margin:4px 0">({p["Seed"]}) {p["Team"]}</div><div style="font-size:13px;opacity:0.9">vs {p["Opponent"]} · Spread: {p["Spread"]:+.1f}</div><div style="font-size:12px;margin-top:8px;line-height:1.6">Win: <b>{p["Win%"]:.0%}</b> · Opp: <b>{p["Opp Pick%"]:.1%}</b> · FV: <b>{p["Future Value"]:.2f}</b><br>Surv: <b>{p["Survival"]:.0%}</b> · Avail: <b>{p["Entries Avail"]}</b><br><span style="font-size:14px"><b>{sn}: {p[sk]:.3f}</b></span></div></div>'
+                cs, cl = st.columns(2)
+                with cs: st.markdown(pcard(ts,"SAFETY PICK","#2ecc71","🛡️","Safety","Safety"), unsafe_allow_html=True)
+                with cl: st.markdown(pcard(tl,"LEVERAGE PICK","#f39c12","⚡","Leverage","Leverage"), unsafe_allow_html=True)
+                if ts and tl and ts["Team"]==tl["Team"]:
+                    st.info(f"🎯 Both converge on **{ts['Team']}**. Showing alternatives:")
+                    a2s = sr[1] if len(sr)>1 else None
+                    a2l = next((lp for lp in lr if lp["Team"]!=tl["Team"] and (not a2s or lp["Team"]!=a2s["Team"])), None)
+                    ca, cb = st.columns(2)
+                    with ca:
+                        if a2s: st.markdown(pcard(a2s,"SAFETY ALT","#27ae60","🛡️","Safety","Safety"), unsafe_allow_html=True)
+                    with cb:
+                        if a2l: st.markdown(pcard(a2l,"LEVERAGE ALT","#e67e22","⚡","Leverage","Leverage"), unsafe_allow_html=True)
+                else:
+                    with st.expander("📋 Runner-ups"):
+                        ca, cb = st.columns(2)
+                        with ca:
+                            if len(sr)>1: st.markdown(pcard(sr[1],"SAFETY #2","#27ae60","🛡️","Safety","Safety"), unsafe_allow_html=True)
+                        with cb:
+                            a2l = next((lp for lp in lr if lp["Team"]!=(tl["Team"] if tl else "") and lp["Team"]!=(ts["Team"] if ts else "")), None)
+                            if a2l: st.markdown(pcard(a2l,"LEVERAGE #2","#e67e22","⚡","Leverage","Leverage"), unsafe_allow_html=True)
                 st.markdown("##### Full Rankings")
-                sort_col = st.radio("Sort by", ["Safety", "Leverage", "Win%", "Future Value"],
-                                     horizontal=True, key=f"sort_{en}")
-                df = pd.DataFrame(res)
-                df = df.sort_values(sort_col, ascending=(sort_col == "Future Value"))
-
-                for col,fmt in [("Win%","{:.1%}"),("Opp Pick%","{:.1%}"),("Future Value","{:.2f}"),
-                                ("Survival","{:.1%}"),("Safety","{:.3f}"),("Leverage","{:.3f}"),
-                                ("Spread","{:+.1f}")]:
+                sc = st.radio("Sort by", ["Safety","Leverage","Win%","Future Value"], horizontal=True, key=f"sort_{en}")
+                df = pd.DataFrame(res).sort_values(sc, ascending=(sc=="Future Value"))
+                for col,fmt in [("Win%","{:.1%}"),("Opp Pick%","{:.1%}"),("Future Value","{:.2f}"),("Survival","{:.1%}"),("Safety","{:.3f}"),("Leverage","{:.3f}"),("Spread","{:+.1f}")]:
                     df[col] = df[col].apply(lambda x, f=fmt: f.format(x))
-                st.dataframe(df, use_container_width=True, hide_index=True)
-                st.markdown("---")
-
+                st.dataframe(df, use_container_width=True, hide_index=True); st.markdown("---")
             st.markdown("""### 📝 How to Read This
-
-**🛡️ Safety Pick** — Best team to survive today without wasting a premium asset.
-The formula heavily penalizes burning 1/2-seeds in early rounds because you'll need them
-when the field narrows. A 6-seed at 72% often scores higher than a 1-seed at 99% early on.
-
-**⚡ Leverage Pick** — Best contrarian play that's still +EV. Maximizes opponent eliminations.
-If 15% of the pool is on Team X and only 3% on Team Y, and both have ~70% win probability,
-Team Y is the leverage play — when it wins, you survive while more opponents are eliminated.
-
-**Key columns:**
-- **Future Value** — 0.0 to 1.0, how valuable it is to SAVE this team. High FV = don't use today.
-  1-seeds in Round 1 have ~0.95 FV. 8-seeds have ~0.0. This drops as the tournament progresses.
-- **Survival** — Monte Carlo probability of surviving ALL remaining rounds if you pick this team today.
-  The sim uses smart future play (saves top seeds) instead of always grabbing the best available.
-- **Opp Pick%** — What % of opponents are on this team. Lower = more contrarian.
-- **Entries Avail** — How many opponents still have this team available (based on actual pick data).
-
-**When to pick Safety vs Leverage:**
-- **Ahead / many entries alive** → Leverage (maximize opponent eliminations)
-- **Behind / need to survive** → Safety (don't die today)
-- **Both agree** → Strong signal, take it""")
-        else:
-            st.info("Click **Run Simulation Engine** to generate picks.")
-    else:
-        st.info("No games for this day yet.")
-
+**🛡️ Safety** — Survive today without wasting a premium asset. Penalizes burning 1/2-seeds early.
+**⚡ Leverage** — Best contrarian play that's +EV. Guaranteed to be a different team than Safety.
+**Key columns:** Future Value (0-1, save this team?), Survival (MC forward sim), Opp Pick% (contrarian edge)
+**When to use which:** Ahead → Leverage. Behind → Safety. Both agree → strong signal.""")
+        else: st.info("Click **Run Simulation Engine** to generate picks.")
+    else: st.info("No games for this day yet.")
 
 # ═══════════════════════════════════════════════════════════
 #  TAB 5: BRACKET
 # ═══════════════════════════════════════════════════════════
 with tab_bracket:
     st.markdown("### 🏟️ Live Bracket")
-    rl = {"R1":"Round of 64","R2":"Round of 32","S16":"Sweet 16",
-          "E8":"Elite 8","FF":"Final Four","CHAMP":"Championship"}
+    rl = {"R1":"Round of 64","R2":"Round of 32","S16":"Sweet 16","E8":"Elite 8","FF":"Final Four","CHAMP":"Championship"}
     for rnd in ["R1","R2","S16","E8","FF","CHAMP"]:
         rg = {gid:g for gid,g in live_bracket.items() if get_round(gid)==rnd}
         if not rg: continue
-        st.markdown(f"#### {rl[rnd]}")
-        rows = []
+        st.markdown(f"#### {rl[rnd]}"); rows = []
         for gid,g in sorted(rg.items()):
             ta,tb = g["team_a"],g["team_b"]
             sa="❌" if ta in eliminated else ("🏆" if gid in all_winners and all_winners[gid]==ta else "✅")
             sb_="❌" if tb in eliminated else ("🏆" if gid in all_winners and all_winners[gid]==tb else "✅")
             sp=st.session_state.spread_overrides.get(f"spread_{gid}",g.get("spread"))
-            sps=f"{sp:+.1f}" if sp is not None else "TBD"
             rows.append({"Day":g.get("day","TBD"),"Region":g.get("region",""),
                 "Team A":f"{sa} ({g['seed_a']}) {ta}" if g.get("seed_a") else f"{sa} {ta}",
                 "Team B":f"{sb_} ({g['seed_b']}) {tb}" if g.get("seed_b") else f"{sb_} {tb}",
-                "Spread":sps,"Winner":all_winners.get(gid,"—"),
+                "Spread":f"{sp:+.1f}" if sp is not None else "TBD","Winner":all_winners.get(gid,"—"),
                 "Status":"✅" if gid in all_winners else ("⏳" if not g.get("teams_known",True) else "🔜")})
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    st.markdown("---")
     st.markdown(f"**{len(eliminated)} eliminated:** {', '.join(sorted(eliminated)) if eliminated else 'None yet'}")
-
 
 # ═══════════════════════════════════════════════════════════
 #  TAB 6: METHODOLOGY
 # ═══════════════════════════════════════════════════════════
 with tab_detail:
     st.markdown("""### 📐 Methodology
-
-#### Auto-Update Pipeline
-ESPN Scoreboard API → match teams → propagate winners through bracket tree → generate future matchups
-
-#### Pick Data Integration
-When you enter actual pool pick counts in the **Pick Tracking** tab:
-1. **Opponent Pick %** switches from modeled → actual data for that day
-2. **Entries Available** computed by subtracting cumulative picks from total pool size
-3. Future days still use the seed-saving model until you enter real data for those days
-
-#### Entries Available Per Team
-For each team, we track how many pool entries have already used that team:
-`Entries Available = Total Pool Entries - Sum(picks on this team across all prior days)`
-
-This tells you how many opponents can still pick this team in future rounds.
-
-#### Win Probability
-Spread → win% via normal CDF (σ = 11.0)""")
-    st.dataframe(pd.DataFrame([{"Spread":f"{s:+.1f}","Win%":f"{win_prob(s):.1%}"}
-        for s in [-1.5,-3.5,-6.5,-10.5,-16.5,-22.5,-27.5]]), hide_index=True)
-    st.markdown("""
-#### Opponent Model (Hybrid)
-- **With actual data**: Pick% = team's actual picks / total picks that day
-- **Without actual data (modeled)**:
-  - **Hard floor**: Teams below 45% win probability get 0% picks (nobody takes underdogs in survivor)
-  - **Steep power curve**: `win_prob^4` concentrates picks on strong favorites
-  - **Seed-saving**: 1-seeds discounted to 8% of base in early rounds, 2-seeds to 15%, scaling up as tournament progresses
-  - **Brand boost**: 15% lift for well-known programs
-  - Result: 4-5 seeds get ~11-13%, 3-seeds ~8-10%, 6-seeds ~3-6%, 1-seeds ~1-2%, all underdogs 0%
-
-#### Future Value (NEW in v4)
-Each team gets a Future Value score (0.0 to 1.0) representing how valuable it is to SAVE them:
-- **Seed premium**: 1-seeds = 0.95, 2-seeds = 0.82, 3-seeds = 0.60, 4 = 0.40, 5 = 0.25, 6-7 = 0.10, 8+ = 0.0
-- **Time scaling**: scales with rounds remaining (more future = more valuable to save)
-- **Alive factor**: weighted by win probability (team must actually survive to have future value)
-
-#### Smart Future Simulation (NEW in v4)
-The Monte Carlo sim now uses **smart future play** instead of greedy:
-- Early tournament (>3 rounds left): avoids 1-seeds AND 2-seeds in future picks
-- Mid tournament (2-3 rounds left): avoids 1-seeds only
-- Late tournament (last round): uses whatever is best
-This properly models the COST of burning a premium team early.
-
-#### Safety Score
-`win_prob × (1 - 0.7 × future_value) × (0.3 + 0.7 × survival)`
-Maximizes today's survival while heavily penalizing use of future-valuable teams.
-
-#### Leverage Score
-`(1 - opp_pct)^0.6 × win_prob × (1 - 0.5 × future_value) × survival^0.5`
-Maximizes contrarian edge (sub-linear to avoid chasing extreme low-pick teams) with moderate future-value penalty.
-
-#### Minimum Win Probability Thresholds
-- Safety picks: must be ≥55% win probability
-- Leverage picks: must be ≥50% win probability
-
-#### Data Persistence
-- All picks, spreads, settings, and pick counts **auto-save** to `survivor_state.json` on every interaction
-- On app restart, data **auto-loads** from this file
-- Use **Export/Import** in sidebar for Streamlit Cloud portability""")
+#### Multi-Contest Support
+Each contest has independent: pool size, entry count, pick counts, and personal picks. Spreads, game results, and sim settings are shared. Switch contests via the sidebar dropdown.
+#### Auto-Update: ESPN API → bracket tree → future matchup generation
+#### Win Probability: spread → normal CDF (σ = 11.0)""")
+    st.dataframe(pd.DataFrame([{"Spread":f"{s:+.1f}","Win%":f"{win_prob(s):.1%}"} for s in [-1.5,-3.5,-6.5,-10.5,-16.5,-22.5,-27.5]]), hide_index=True)
+    st.markdown("""#### Opponent Model
+- **With actual data**: real pick counts from your pool
+- **Modeled**: wp^4 power curve · hard 45% floor · seed-saving (1-seeds at 8% base in R1) · brand boost
+#### Future Value: seed premium × time remaining × alive probability (0.0-1.0)
+#### Safety: `win_prob × (1 - 0.7×FV) × (0.3 + 0.7×survival)`
+#### Leverage: `(1-opp_pct)^0.6 × win_prob × (1 - 0.5×FV) × survival^0.5`
+#### Smart Sim: future rounds save 1/2 seeds instead of greedy best-available""")
 
 st.markdown("---")
-st.caption("Survivor Engine v4.0 | Smart sim + Future Value + Safety/Leverage picks | ESPN auto-update")
-
-# ═══════════════════════════════════════════════════════════
-#  AUTO-SAVE — runs at end of every Streamlit rerun
-# ═══════════════════════════════════════════════════════════
+st.caption("Survivor Engine v4.0 | Multi-contest | Smart sim + FV + Safety/Leverage | ESPN auto-update")
 save_state()
