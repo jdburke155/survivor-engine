@@ -693,8 +693,9 @@ with tab_picks:
             for t, s in [(ta, g.get("seed_a")), (tb, g.get("seed_b"))]:
                 cnt = pc.get(f"{pick_tab_day}|{t}", 0)
                 pick_data.append({"Team":t,"Seed":s,"Picks":cnt,
-                    "Pick%":f"{cnt/max(total_today,1):.1%}","Opponent":tb if t==ta else ta})
-        if pick_data: st.dataframe(pd.DataFrame(pick_data).sort_values("Picks",ascending=False), use_container_width=True, hide_index=True)
+                    "Pick%":cnt/max(total_today,1)*100,"Opponent":tb if t==ta else ta})
+        if pick_data: st.dataframe(pd.DataFrame(pick_data).sort_values("Picks",ascending=False), use_container_width=True, hide_index=True,
+            column_config={"Pick%": st.column_config.NumberColumn(format="%.1f%%")})
     else: st.info("No games for this day yet.")
 
     # My Picks
@@ -743,8 +744,9 @@ with tab_picks:
         total_used = sum(pc.get(f"{TOURNAMENT_DAYS[d]}|{team}", 0) for d in range(avail_idx))
         remaining = max(C["total_entries"] - total_used, 0)
         avail_rows.append({"Team":team,"Seed":seed,"Times Picked":total_used,
-            "Entries Still Have":remaining,"% Available":f"{remaining/max(C['total_entries'],1):.1%}"})
-    if avail_rows: st.dataframe(pd.DataFrame(avail_rows).sort_values("Times Picked",ascending=False), use_container_width=True, hide_index=True)
+            "Entries Still Have":remaining,"% Available":remaining/max(C['total_entries'],1)*100})
+    if avail_rows: st.dataframe(pd.DataFrame(avail_rows).sort_values("Times Picked",ascending=False), use_container_width=True, hide_index=True,
+        column_config={"% Available": st.column_config.NumberColumn(format="%.1f%%")})
 
 # ═══════════════════════════════════════════════════════════
 #  TAB 3: SWEAT BOARD (per-contest)
@@ -896,9 +898,19 @@ with tab_recs:
                 st.markdown("##### Full Rankings")
                 sc = st.radio("Sort by", ["Safety","Leverage","Win%","Future Value"], horizontal=True, key=f"sort_{en}")
                 df = pd.DataFrame(res).sort_values(sc, ascending=(sc=="Future Value"))
-                for col,fmt in [("Win%","{:.1%}"),("Opp Pick%","{:.1%}"),("Future Value","{:.2f}"),("Survival","{:.1%}"),("Safety","{:.3f}"),("Leverage","{:.3f}"),("Spread","{:+.1f}")]:
-                    df[col] = df[col].apply(lambda x, f=fmt: f.format(x))
-                st.dataframe(df, use_container_width=True, hide_index=True); st.markdown("---")
+                # Convert 0-1 probabilities to 0-100 for display
+                for pct_col in ["Win%", "Opp Pick%", "Survival"]:
+                    df[pct_col] = df[pct_col] * 100
+                st.dataframe(df, use_container_width=True, hide_index=True,
+                    column_config={
+                        "Win%": st.column_config.NumberColumn(format="%.1f%%"),
+                        "Opp Pick%": st.column_config.NumberColumn(format="%.1f%%"),
+                        "Future Value": st.column_config.NumberColumn(format="%.2f"),
+                        "Survival": st.column_config.NumberColumn(format="%.1f%%"),
+                        "Safety": st.column_config.NumberColumn(format="%.3f"),
+                        "Leverage": st.column_config.NumberColumn(format="%.3f"),
+                        "Spread": st.column_config.NumberColumn(format="%+.1f"),
+                    }); st.markdown("---")
             st.markdown("""### 📝 How to Read This
 **🛡️ Safety** — Survive today without wasting a premium asset. Penalizes burning 1/2-seeds early.
 **⚡ Leverage** — Best contrarian play that's +EV. Guaranteed to be a different team than Safety.
