@@ -339,12 +339,18 @@ def compute_opp_pct_model(avail, rd_idx, total_rds, pick_counts, current_day, to
         wp_floor = 0.45 if rr > 2 else 0.35
         if wp < wp_floor: scores[t["team"]] = 0.0; continue
         base = wp ** 4
-        if rr > 5: disc = {1:0.08,2:0.15,3:0.50,4:0.80,5:0.95}.get(seed, 1.0)
-        elif rr > 3: disc = {1:0.25,2:0.45,3:0.75}.get(seed, 1.0)
+        # Seed-saving: 1/2 heavily saved, 3 moderately saved
+        if rr > 5: disc = {1:0.08,2:0.15,3:0.40}.get(seed, 1.0)
+        elif rr > 3: disc = {1:0.25,2:0.45,3:0.65}.get(seed, 1.0)
         elif rr > 1: disc = {1:0.60,2:0.80}.get(seed, 1.0)
         else: disc = 1.0
+        # R1 chalk boost: 4/5/6 seeds are the "obvious" survivor picks.
+        # Tough R2 matchups make people want to burn them now.
+        if rr > 5: chalk = {4:1.8, 5:1.8, 6:2.5}.get(seed, 1.0)
+        elif rr > 3: chalk = {4:1.3, 5:1.3, 6:1.5}.get(seed, 1.0)
+        else: chalk = 1.0
         brand = 1.15 if t["team"] in BRAND else 1.0
-        scores[t["team"]] = base * disc * brand
+        scores[t["team"]] = base * disc * chalk * brand
     tot = sum(scores.values())
     if tot == 0: return {t["team"]: 1.0/len(avail) for t in avail}
     return {t: s/tot for t, s in scores.items()}
@@ -403,7 +409,20 @@ def compute_safety_score(wp, fv, survival):
     return wp * (1.0 - 0.7*fv) * (0.3 + 0.7*survival)
 
 def compute_leverage_score(wp, opp_pct, fv, survival):
-    return ((1.0 - opp_pct)**0.6) * wp * (1.0 - 0.5*fv) * (survival**0.5 if survival > 0 else 0)
+    """
+    Leverage = find the close game nobody else is picking.
+
+    - Contrarian exponent 1.5: steep penalty for popular picks.
+      9% ownership is MUCH worse than 1.4% — this is the key differentiator.
+    - wp capped at 85% then sqrt-compressed: 99% and 85% get same credit,
+      59% is only ~15% behind. Leverage isn't about picking blowouts.
+    - FV penalty 70%: never burn premium teams for "leverage"
+    """
+    contrarian = (1.0 - opp_pct) ** 1.5
+    wp_capped = min(wp, 0.85) ** 0.5
+    fv_penalty = 1.0 - 0.7 * fv
+    surv_factor = survival ** 0.5 if survival > 0 else 0
+    return contrarian * wp_capped * fv_penalty * surv_factor
 
 MIN_WP_SAFETY = 0.55
 MIN_WP_LEVERAGE = 0.50
@@ -875,6 +894,7 @@ with tab_recs:
             st.markdown("""### 📝 How to Read This
 **🛡️ Safety** — Survive today without wasting a premium asset. Penalizes burning 1/2-seeds early.
 **⚡ Leverage** — Best contrarian play that's +EV. Guaranteed to be a different team than Safety.
+Close-game picks (7-10 seeds) with near-zero ownership rank highest — true leverage is going where nobody else goes.
 **Key columns:** Future Value (0-1, save this team?), Survival (MC forward sim), Opp Pick% (contrarian edge)
 **When to use which:** Ahead → Leverage. Behind → Safety. Both agree → strong signal.""")
         else: st.info("Click **Run Simulation Engine** to generate picks.")
@@ -915,10 +935,13 @@ Each contest has independent: pool size, entry count, pick counts, and personal 
     st.dataframe(pd.DataFrame([{"Spread":f"{s:+.1f}","Win%":f"{win_prob(s):.1%}"} for s in [-1.5,-3.5,-6.5,-10.5,-16.5,-22.5,-27.5]]), hide_index=True)
     st.markdown("""#### Opponent Model
 - **With actual data**: real pick counts from your pool
-- **Modeled**: wp^4 power curve · hard 45% floor · seed-saving (1-seeds at 8% base in R1) · brand boost
+- **Modeled**: wp^4 power curve · hard 45% floor · seed-saving (1-seeds at 8% base in R1) · 4/5/6-seed chalk boost · brand boost
 #### Future Value: seed premium × time remaining × alive probability (0.0-1.0)
 #### Safety: `win_prob × (1 - 0.7×FV) × (0.3 + 0.7×survival)`
-#### Leverage: `(1-opp_pct)^0.6 × win_prob × (1 - 0.5×FV) × survival^0.5`
+#### Leverage: `(1-opp_pct)^1.5 × min(win_prob, 0.85)^0.5 × (1 - 0.7×FV) × survival^0.5`
+- Contrarian exponent 1.5: steep — 10% ownership is MUCH worse than 1% (rewards close-game picks)
+- wp capped at 85% then sqrt-compressed: 99% and 59% teams are close in score (leverage ≠ blowouts)
+- FV penalty 70%: never burn premium teams for leverage
 #### Smart Sim: future rounds save 1/2 seeds instead of greedy best-available""")
 
 st.markdown("---")
