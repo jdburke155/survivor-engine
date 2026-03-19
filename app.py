@@ -146,19 +146,99 @@ BRACKET_TREE = {
     "CHAMP":("FF_1","FF_2"),
 }
 
-TOURNAMENT_DAYS = ["Thu 3/19","Fri 3/20","Sat 3/21","Sun 3/22","Thu 3/27","Fri 3/28",
-                   "Sat 3/29","Sun 3/30","Sat 4/4","Mon 4/6"]
+TOURNAMENT_DAYS = ["Thu 3/19","Fri 3/20","Sat 3/21","Sun 3/22","Thu 3/26","Fri 3/27",
+                   "Sat 3/28","Sun 3/29","Sat 4/4","Mon 4/6"]
 ROUND_NAMES = {"Thu 3/19":"Rd of 64 (Thu)","Fri 3/20":"Rd of 64 (Fri)",
     "Sat 3/21":"Rd of 32 (Sat)","Sun 3/22":"Rd of 32 (Sun)",
-    "Thu 3/27":"Sweet 16 (Thu)","Fri 3/28":"Sweet 16 (Fri)",
-    "Sat 3/29":"Elite 8 (Sat)","Sun 3/30":"Elite 8 (Sun)",
+    "Thu 3/26":"Sweet 16 (Thu)","Fri 3/27":"Sweet 16 (Fri)",
+    "Sat 3/28":"Elite 8 (Sat)","Sun 3/29":"Elite 8 (Sun)",
     "Sat 4/4":"Final Four","Mon 4/6":"Championship"}
 DAY_TO_DATE = {"Thu 3/19":"20260319","Fri 3/20":"20260320","Sat 3/21":"20260321",
-    "Sun 3/22":"20260322","Thu 3/27":"20260327","Fri 3/28":"20260328",
-    "Sat 3/29":"20260329","Sun 3/30":"20260330","Sat 4/4":"20260404","Mon 4/6":"20260406"}
+    "Sun 3/22":"20260322","Thu 3/26":"20260326","Fri 3/27":"20260327",
+    "Sat 3/28":"20260328","Sun 3/29":"20260329","Sat 4/4":"20260404","Mon 4/6":"20260406"}
 REGION_DAY_R2 = {"East":"Sat 3/21","West":"Sun 3/22","Midwest":"Sun 3/22","South":"Sat 3/21"}
-REGION_DAY_S16 = {"East":"Thu 3/27","West":"Fri 3/28","Midwest":"Fri 3/28","South":"Thu 3/27"}
-REGION_DAY_E8 = {"East":"Sat 3/29","West":"Sun 3/30","Midwest":"Sun 3/30","South":"Sat 3/29"}
+# S16/E8 mapping from 2026 regional sites: Houston+San Jose (Thu/Sat) = South+West, Chicago+DC (Fri/Sun) = East+Midwest
+# Source: PoolGenius schedule grid — "East (Sunday) vs South (Saturday), West (Saturday) vs Midwest (Sunday)"
+REGION_DAY_S16 = {"East":"Fri 3/27","West":"Thu 3/26","Midwest":"Fri 3/27","South":"Thu 3/26"}
+REGION_DAY_E8 = {"East":"Sun 3/29","West":"Sat 3/28","Midwest":"Sun 3/29","South":"Sat 3/28"}
+
+# ═══════════════════════════════════════════════════════════
+#  SCHEDULE PAIRING LOGIC — which picks complement each other
+# ═══════════════════════════════════════════════════════════
+# Final Four pairings: East vs South (Sat 4/4), West vs Midwest (Sat 4/4)
+FF_PAIRINGS = [("East", "South"), ("West", "Midwest")]
+
+# For a championship pick to be possible, your E8 picks must come from regions
+# that DON'T play each other in the FF. Valid E8 combos for championship viability:
+# East + West, East + Midwest, South + West, South + Midwest
+# INVALID: East + South (same FF semi), West + Midwest (same FF semi)
+VALID_E8_COMBOS = [("East","West"),("East","Midwest"),("South","West"),("South","Midwest")]
+INVALID_E8_COMBOS = [("East","South"),("West","Midwest")]
+
+def get_team_schedule(team):
+    """Get the day a team plays in each round (based on R64 day and region)."""
+    region = get_team_region(team)
+    r64_day = None
+    for g in FIRST_ROUND.values():
+        if g["team_a"] == team or g["team_b"] == team:
+            r64_day = g["day"]; break
+    if not region or not r64_day: return {}
+    # R32 day follows R64 day: Thu→Sat, Fri→Sun
+    r32_day = "Sat 3/21" if r64_day == "Thu 3/19" else "Sun 3/22"
+    return {
+        "R64": r64_day, "R32": r32_day,
+        "S16": REGION_DAY_S16.get(region),
+        "E8": REGION_DAY_E8.get(region),
+        "FF": "Sat 4/4", "CHAMP": "Mon 4/6",
+    }
+
+def compute_day_conflicts(team, used_teams):
+    """
+    Check if picking this team creates day conflicts in future rounds.
+    Returns dict with warnings for any round where used picks pile up on the same day.
+    """
+    team_sched = get_team_schedule(team)
+    if not team_sched: return {}
+
+    # Build schedule of already-used teams
+    used_by_day = {}  # round -> day -> count of used teams on that day
+    for ut in used_teams:
+        ut_sched = get_team_schedule(ut)
+        for rnd, day in ut_sched.items():
+            if day:
+                key = f"{rnd}|{day}"
+                used_by_day[key] = used_by_day.get(key, 0) + 1
+
+    conflicts = {}
+    for rnd, day in team_sched.items():
+        if not day: continue
+        key = f"{rnd}|{day}"
+        existing = used_by_day.get(key, 0)
+        if existing >= 1 and rnd in ["E8", "FF"]:
+            conflicts[rnd] = f"Already have {existing} pick(s) on {day} for {rnd}"
+    return conflicts
+
+def check_championship_feasibility(used_teams):
+    """
+    Check if current picks still allow a championship game pick.
+    Returns (feasible: bool, warning: str or None).
+    """
+    e8_regions_used = set()
+    for t in used_teams:
+        region = get_team_region(t)
+        sched = get_team_schedule(t)
+        # If this team was used on an E8 day, it counts
+        # But really we need to check: would this team be an E8 pick?
+        # Simpler: track all regions of used teams
+        if region:
+            e8_regions_used.add(region)
+
+    # Check if any invalid E8 combo is fully covered
+    for r1, r2 in INVALID_E8_COMBOS:
+        if r1 in e8_regions_used and r2 in e8_regions_used:
+            return False, f"⚠️ Used teams from both {r1} and {r2} — these meet in the FF. No championship pick possible if both are E8 picks."
+
+    return True, None
 
 # ═══════════════════════════════════════════════════════════
 #  ESPN API
@@ -313,6 +393,80 @@ def get_team_seed(team):
         if g["team_b"] == team: return g["seed_b"]
     return None
 
+def get_team_region(team):
+    """Look up region for a team."""
+    for g in FIRST_ROUND.values():
+        if g["team_a"] == team: return g["region"]
+        if g["team_b"] == team: return g["region"]
+    return None
+
+def compute_region_penalty(team_region, used_teams, rd_idx, total_rds):
+    """
+    Penalize picking from a region you've already burned teams in.
+
+    Logic: Each region provides ~5 game-days of teams (R64 Thu, R64 Fri, R32, S16, E8).
+    Using 2+ teams from the same region before the Elite 8 is wasteful because:
+      1. Those teams might face each other (you burned two when only one can advance)
+      2. You'll have fewer options in that region's later-round games
+      3. Only 1 team per region reaches the Final Four — save your picks
+
+    Returns 0.0-1.0 multiplier (lower = bigger penalty).
+    """
+    if not team_region or not used_teams:
+        return 1.0
+
+    # Count how many teams from this region we've already used
+    region_used = 0
+    for t in used_teams:
+        if get_team_region(t) == team_region:
+            region_used += 1
+
+    rounds_remaining = total_rds - rd_idx - 1
+    if rounds_remaining <= 2:
+        # Late tournament (E8/FF/Championship): regions are collapsing, less penalty
+        if region_used >= 3: return 0.70
+        if region_used >= 2: return 0.85
+        return 1.0
+
+    # Early/mid tournament: heavy penalty for region hoarding
+    if region_used >= 3:
+        return 0.40  # Already burned 3 from this region — very bad
+    elif region_used >= 2:
+        return 0.60  # Burned 2 — problematic
+    elif region_used >= 1:
+        return 0.85  # Burned 1 — slight preference to diversify
+    return 1.0
+
+def compute_scarcity_factor(team, used_teams, future_days, eliminated):
+    """
+    How many viable teams will you have left in future rounds if you pick this team today?
+
+    Returns 0.0-1.0. Lower = picking this team leaves you dangerously thin later.
+
+    If any future day would have ≤1 available team after this pick, that's a red flag.
+    If you'd have 0 on any day, that's a death sentence (guaranteed elimination).
+    """
+    sim_used = set(used_teams) | {team}
+    min_options = 999
+
+    for ft in future_days:
+        if not ft:
+            continue
+        available = [t for t in ft if t["team"] not in sim_used and t["team"] not in eliminated]
+        min_options = min(min_options, len(available))
+
+    if min_options == 999:
+        return 1.0  # No future data yet
+    if min_options == 0:
+        return 0.1  # Would leave a future day with ZERO options — near death
+    if min_options == 1:
+        return 0.4  # Only 1 option on some future day — very risky
+    if min_options == 2:
+        return 0.7  # Tight but workable
+    if min_options <= 4:
+        return 0.9  # Fine
+    return 1.0  # Plenty of options
+
 def compute_entries_with_team_available(team, day_idx, pick_counts, total_entries):
     used = 0
     for d_i in range(day_idx):
@@ -375,62 +529,92 @@ def compute_future_value(seed, wp, rd_idx, total_rds):
     else: premium = 0.0
     return premium * min(rr/4.0, 1.0) * min(wp*1.3, 1.0)
 
-def smart_future_pick(available, rounds_remaining):
+def smart_future_pick(available, rounds_remaining, used_regions=None):
+    """Pick best team for a future sim round with seed-saving AND region diversity."""
     if not available: return None
     if rounds_remaining <= 1: return max(available, key=lambda x: x["win_prob"])
+
+    def region_ok(t):
+        """Prefer teams from regions we haven't over-used."""
+        if not used_regions: return True
+        r = t.get("region")
+        return used_regions.get(r, 0) < 2  # Allow up to 1 from same region
+
     if rounds_remaining > 3:
-        mid = [t for t in available if (t.get("seed") or 99) > 2]
-        if mid: return max(mid, key=lambda x: x["win_prob"])
+        # Early: avoid 1/2 seeds, prefer underused regions
+        candidates = [t for t in available if (t.get("seed") or 99) > 2 and region_ok(t)]
+        if not candidates:
+            candidates = [t for t in available if (t.get("seed") or 99) > 2]
+        if candidates: return max(candidates, key=lambda x: x["win_prob"])
+
     if rounds_remaining > 1:
-        non_top = [t for t in available if (t.get("seed") or 99) > 1]
-        if non_top: return max(non_top, key=lambda x: x["win_prob"])
+        candidates = [t for t in available if (t.get("seed") or 99) > 1 and region_ok(t)]
+        if not candidates:
+            candidates = [t for t in available if (t.get("seed") or 99) > 1]
+        if candidates: return max(candidates, key=lambda x: x["win_prob"])
+
     return max(available, key=lambda x: x["win_prob"])
 
 def sim_survivor(pick, avail_today, future_days, n, rd_idx, total_rds, used, pick_counts, total_entries):
     today_map = {t["team"]: t["win_prob"] for t in avail_today}
     if pick not in today_map: return 0.0
 
-    # Filter to only future days that have known teams
-    known_future = [ft for ft in future_days if ft]
+    # Build region lookup from avail_today + future_days
+    team_regions = {}
+    for t in avail_today:
+        team_regions[t["team"]] = t.get("region") or get_team_region(t["team"])
+    for ft in future_days:
+        for t in ft:
+            team_regions[t["team"]] = t.get("region") or get_team_region(t["team"])
 
+    known_future = [ft for ft in future_days if ft]
     survivals = 0
+
     for _ in range(n):
         ok = True; su = set(used); su.add(pick)
+
+        # Track region usage for this sim path
+        used_regions = {}
+        for t in su:
+            r = team_regions.get(t) or get_team_region(t)
+            if r: used_regions[r] = used_regions.get(r, 0) + 1
+
         if np.random.random() >= today_map[pick]: ok = False
         elif known_future:
             for fi, ft in enumerate(known_future):
                 rr = total_rds - (rd_idx + 1 + fi)
                 av = [t for t in ft if t["team"] not in su]
                 if not av: ok = False; break
-                best = smart_future_pick(av, rr)
+                best = smart_future_pick(av, rr, used_regions)
                 if best is None: ok = False; break
                 su.add(best["team"])
+                br = team_regions.get(best["team"])
+                if br: used_regions[br] = used_regions.get(br, 0) + 1
                 if np.random.random() >= best["win_prob"]: ok = False; break
         if ok: survivals += 1
     return survivals / max(n, 1)
 
-def compute_safety_score(wp, fv, survival):
-    # When survival is 0 (no future data yet), fall back to wp × fv_penalty alone
-    # so scores aren't all zeroed out pre-tournament
-    surv_factor = (0.3 + 0.7 * survival) if survival > 0 else 0.5
-    return wp * (1.0 - 0.7 * fv) * surv_factor
-
-def compute_leverage_score(wp, opp_pct, fv, survival):
+def compute_safety_score(wp, fv, survival, region_pen=1.0, scarcity=1.0):
     """
-    Leverage = find the close game nobody else is picking.
+    Safety = survive today, preserve future assets, diversify regions, maintain options.
 
-    - Contrarian exponent 1.5: steep penalty for popular picks.
-      9% ownership is MUCH worse than 1.4% — this is the key differentiator.
-    - wp capped at 85% then sqrt-compressed: 99% and 85% get same credit,
-      59% is only ~15% behind. Leverage isn't about picking blowouts.
-    - FV penalty 70%: never burn premium teams for "leverage"
+    win_prob × (1 - 0.7×FV) × surv_factor × region_penalty × scarcity
+
+    Region penalty: picking from an already-used region is penalized.
+    Scarcity: if this pick would leave you with few future options, penalize.
+    """
+    surv_factor = (0.3 + 0.7 * survival) if survival > 0 else 0.5
+    return wp * (1.0 - 0.7 * fv) * surv_factor * region_pen * scarcity
+
+def compute_leverage_score(wp, opp_pct, fv, survival, region_pen=1.0, scarcity=1.0):
+    """
+    Leverage = contrarian close-game pick, don't waste regions or leave yourself thin.
     """
     contrarian = (1.0 - opp_pct) ** 1.5
     wp_capped = min(wp, 0.85) ** 0.5
     fv_penalty = 1.0 - 0.7 * fv
-    # When survival is 0 (no future data yet), use 0.5 floor so scores aren't all zero
     surv_factor = survival ** 0.5 if survival > 0 else 0.5
-    return contrarian * wp_capped * fv_penalty * surv_factor
+    return contrarian * wp_capped * fv_penalty * surv_factor * region_pen * scarcity
 
 MIN_WP_SAFETY = 0.55
 MIN_WP_LEVERAGE = 0.50
@@ -838,8 +1022,8 @@ with tab_recs:
             fd=TOURNAMENT_DAYS[fi]; fg={gid:g for gid,g in live_bracket.items() if g.get("day")==fd}; fa=[]
             for gid,g in fg.items():
                 ok=f"spread_{gid}"; sp=st.session_state.spread_overrides.get(ok,g.get("spread") or 0); wp_=win_prob(sp)
-                if g["team_a"] not in eliminated and "W(" not in g["team_a"]: fa.append({"team":g["team_a"],"win_prob":wp_,"seed":g.get("seed_a")})
-                if g["team_b"] not in eliminated and "W(" not in g["team_b"]: fa.append({"team":g["team_b"],"win_prob":1-wp_,"seed":g.get("seed_b")})
+                if g["team_a"] not in eliminated and "W(" not in g["team_a"]: fa.append({"team":g["team_a"],"win_prob":wp_,"seed":g.get("seed_a"),"region":g.get("region")})
+                if g["team_b"] not in eliminated and "W(" not in g["team_b"]: fa.append({"team":g["team_b"],"win_prob":1-wp_,"seed":g.get("seed_b"),"region":g.get("region")})
             fdt.append(fa)
         if st.button("🚀 Run Simulation Engine", type="primary", use_container_width=True):
             prog = st.progress(0, "Running..."); ar = {}
@@ -853,9 +1037,16 @@ with tab_recs:
                     op = opp.get(ti["team"], 0)
                     fv = compute_future_value(ti["seed"], ti["win_prob"], st.session_state.current_day_idx, len(TOURNAMENT_DAYS))
                     ac = compute_entries_with_team_available(ti["team"], st.session_state.current_day_idx, pc, C["total_entries"])
-                    safety = compute_safety_score(ti["win_prob"], fv, sv)
-                    lev = compute_leverage_score(ti["win_prob"], op, fv, sv)
-                    res.append({"Team":ti["team"],"Seed":ti["seed"],"Region":ti["region"],"Opponent":ti["opponent"],"Spread":ti["spread"],"Win%":ti["win_prob"],"Opp Pick%":op,"Future Value":fv,"Entries Avail":ac,"Survival":sv,"Safety":safety,"Leverage":lev})
+                    rp = compute_region_penalty(ti.get("region"), used, st.session_state.current_day_idx, len(TOURNAMENT_DAYS))
+                    sc = compute_scarcity_factor(ti["team"], used, fdt, eliminated)
+                    dc = compute_day_conflicts(ti["team"], used)
+                    # Day conflicts in E8/FF apply a penalty
+                    day_pen = 0.5 if dc else 1.0
+                    safety = compute_safety_score(ti["win_prob"], fv, sv, rp, sc) * day_pen
+                    lev = compute_leverage_score(ti["win_prob"], op, fv, sv, rp, sc) * day_pen
+                    sched = get_team_schedule(ti["team"])
+                    res.append({"Team":ti["team"],"Seed":ti["seed"],"Region":ti["region"],"Opponent":ti["opponent"],"Spread":ti["spread"],"Win%":ti["win_prob"],"Opp Pick%":op,"Future Value":fv,"Entries Avail":ac,"Survival":sv,"Rgn Pen":rp,"Scarcity":sc,"Safety":safety,"Leverage":lev,
+                        "E8 Day":sched.get("E8","?"),"Day Warn":"⚠️" if dc else "✅"})
                 ar[en] = res
             prog.progress(1.0,"Done!"); st.session_state.sim_results = ar; time.sleep(0.3); prog.empty()
         if st.session_state.sim_results:
@@ -863,6 +1054,12 @@ with tab_recs:
                 st.markdown(f"#### Entry #{en}")
                 used = st.session_state.used_teams.get(f"{st.session_state.active_contest}_{en}", set())
                 if used: st.caption(f"Already used: {', '.join('~~'+t+'~~' if t in eliminated else t for t in sorted(used))}")
+
+                # Championship feasibility check
+                feasible, champ_warn = check_championship_feasibility(used)
+                if not feasible:
+                    st.error(champ_warn)
+
                 if not res: st.warning("No teams available."); continue
                 sr = sorted([r for r in res if r["Win%"]>=MIN_WP_SAFETY], key=lambda x: x["Safety"], reverse=True)
                 lr = sorted([r for r in res if r["Win%"]>=MIN_WP_LEVERAGE], key=lambda x: x["Leverage"], reverse=True)
@@ -874,7 +1071,11 @@ with tab_recs:
                     if tl is None: tl = lr[0]
                 def pcard(p, label, color, icon, sn, sk):
                     if not p: return f'<div style="border:1px solid #555;border-radius:8px;padding:12px;opacity:0.5">No {label.lower()} available</div>'
-                    return f'<div style="border:2px solid {color};border-radius:8px;padding:12px;background:rgba({",".join(str(int(color.lstrip("#")[i:i+2],16)) for i in (0,2,4))},0.1)"><div style="font-size:13px;color:{color};font-weight:bold">{icon} {label}</div><div style="font-size:22px;font-weight:bold;margin:4px 0">({p["Seed"]}) {p["Team"]}</div><div style="font-size:13px;opacity:0.9">vs {p["Opponent"]} · Spread: {p["Spread"]:+.1f}</div><div style="font-size:12px;margin-top:8px;line-height:1.6">Win: <b>{p["Win%"]:.0%}</b> · Opp: <b>{p["Opp Pick%"]:.1%}</b> · FV: <b>{p["Future Value"]:.2f}</b><br>Surv: <b>{p["Survival"]:.0%}</b> · Avail: <b>{p["Entries Avail"]}</b><br><span style="font-size:14px"><b>{sn}: {p[sk]:.3f}</b></span></div></div>'
+                    rgn_warn = f' · <span style="color:#e74c3c">⚠ Rgn:{p.get("Rgn Pen",1):.0%}</span>' if p.get("Rgn Pen",1) < 1 else ""
+                    scar_warn = f' · <span style="color:#e67e22">⚠ Thin:{p.get("Scarcity",1):.0%}</span>' if p.get("Scarcity",1) < 1 else ""
+                    day_warn = f' · <span style="color:#e74c3c">⚠ Day conflict</span>' if p.get("Day Warn")=="⚠️" else ""
+                    e8d = p.get("E8 Day","?")
+                    return f'<div style="border:2px solid {color};border-radius:8px;padding:12px;background:rgba({",".join(str(int(color.lstrip("#")[i:i+2],16)) for i in (0,2,4))},0.1)"><div style="font-size:13px;color:{color};font-weight:bold">{icon} {label}</div><div style="font-size:22px;font-weight:bold;margin:4px 0">({p["Seed"]}) {p["Team"]}</div><div style="font-size:13px;opacity:0.9">vs {p["Opponent"]} · Spread: {p["Spread"]:+.1f} · {p["Region"]} · E8: {e8d}</div><div style="font-size:12px;margin-top:8px;line-height:1.6">Win: <b>{p["Win%"]:.0%}</b> · Opp: <b>{p["Opp Pick%"]:.1%}</b> · FV: <b>{p["Future Value"]:.2f}</b><br>Surv: <b>{p["Survival"]:.0%}</b> · Avail: <b>{p["Entries Avail"]}</b>{rgn_warn}{scar_warn}{day_warn}<br><span style="font-size:14px"><b>{sn}: {p[sk]:.3f}</b></span></div></div>'
                 cs, cl = st.columns(2)
                 with cs: st.markdown(pcard(ts,"SAFETY PICK","#2ecc71","🛡️","Safety","Safety"), unsafe_allow_html=True)
                 with cl: st.markdown(pcard(tl,"LEVERAGE PICK","#f39c12","⚡","Leverage","Leverage"), unsafe_allow_html=True)
@@ -896,7 +1097,7 @@ with tab_recs:
                             a2l = next((lp for lp in lr if lp["Team"]!=(tl["Team"] if tl else "") and lp["Team"]!=(ts["Team"] if ts else "")), None)
                             if a2l: st.markdown(pcard(a2l,"LEVERAGE #2","#e67e22","⚡","Leverage","Leverage"), unsafe_allow_html=True)
                 st.markdown("##### Full Rankings")
-                sc = st.radio("Sort by", ["Safety","Leverage","Win%","Future Value"], horizontal=True, key=f"sort_{en}")
+                sc = st.radio("Sort by", ["Safety","Leverage","Win%","Future Value","Rgn Pen","Scarcity"], horizontal=True, key=f"sort_{en}")
                 df = pd.DataFrame(res).sort_values(sc, ascending=(sc=="Future Value"))
                 # Convert 0-1 probabilities to 0-100 for display
                 for pct_col in ["Win%", "Opp Pick%", "Survival"]:
@@ -907,15 +1108,32 @@ with tab_recs:
                         "Opp Pick%": st.column_config.NumberColumn(format="%.1f%%"),
                         "Future Value": st.column_config.NumberColumn(format="%.2f"),
                         "Survival": st.column_config.NumberColumn(format="%.1f%%"),
+                        "Rgn Pen": st.column_config.NumberColumn("Region", format="%.2f", help="Region diversity penalty (1.0=good, <1=already used this region)"),
+                        "Scarcity": st.column_config.NumberColumn(format="%.2f", help="Future options remaining (1.0=plenty, <1=running thin)"),
                         "Safety": st.column_config.NumberColumn(format="%.3f"),
                         "Leverage": st.column_config.NumberColumn(format="%.3f"),
                         "Spread": st.column_config.NumberColumn(format="%+.1f"),
+                        "E8 Day": st.column_config.TextColumn("E8 Day", help="Which day this team's region plays in the Elite 8"),
+                        "Day Warn": st.column_config.TextColumn("Sched", help="⚠️ = day conflict with existing picks in E8/FF"),
                     }); st.markdown("---")
             st.markdown("""### 📝 How to Read This
-**🛡️ Safety** — Survive today without wasting a premium asset. Penalizes burning 1/2-seeds early.
+**🛡️ Safety** — Survive today without wasting a premium asset, while staying diversified across regions.
 **⚡ Leverage** — Best contrarian play that's +EV. Guaranteed to be a different team than Safety.
 Close-game picks (7-10 seeds) with near-zero ownership rank highest — true leverage is going where nobody else goes.
-**Key columns:** Future Value (0-1, save this team?), Survival (MC forward sim), Opp Pick% (contrarian edge)
+
+**Key columns:**
+- **E8 Day**: When this team's region plays in the Elite 8 (Sat 3/28 or Sun 3/29). Pair picks from opposite E8 days.
+- **Day Warn**: ⚠️ = picking this team creates a day conflict with prior picks in the E8 or Final Four.
+- **Region / Rgn Pen**: Avoid stacking picks from one region. Only 1 team per region reaches the Final Four.
+- **Scarcity**: 1.00 = plenty of future options. <1.00 = picking this team leaves you thin later.
+- **Future Value** (0-1): how valuable is it to SAVE this team for later rounds?
+
+**Schedule pairing (CRITICAL for E8+):**
+- South & West play E8 on **Saturday 3/28** · East & Midwest play E8 on **Sunday 3/29**
+- FF: East vs South, West vs Midwest. If you use both East + South in E8 → no championship pick possible.
+- **Valid E8 combos**: East+West, East+Midwest, South+West, South+Midwest
+- **Invalid E8 combos**: East+South ❌, West+Midwest ❌ (they play each other in the FF)
+
 **When to use which:** Ahead → Leverage. Behind → Safety. Both agree → strong signal.""")
         else: st.info("Click **Run Simulation Engine** to generate picks.")
     else: st.info("No games for this day yet.")
@@ -957,12 +1175,14 @@ Each contest has independent: pool size, entry count, pick counts, and personal 
 - **With actual data**: real pick counts from your pool
 - **Modeled**: wp^4 power curve · hard 45% floor · seed-saving (1-seeds at 8% base in R1) · 4/5/6-seed chalk boost · brand boost
 #### Future Value: seed premium × time remaining × alive probability (0.0-1.0)
-#### Safety: `win_prob × (1 - 0.7×FV) × (0.3 + 0.7×survival)`
-#### Leverage: `(1-opp_pct)^1.5 × min(win_prob, 0.85)^0.5 × (1 - 0.7×FV) × survival^0.5`
-- Contrarian exponent 1.5: steep — 10% ownership is MUCH worse than 1% (rewards close-game picks)
-- wp capped at 85% then sqrt-compressed: 99% and 59% teams are close in score (leverage ≠ blowouts)
-- FV penalty 70%: never burn premium teams for leverage
-#### Smart Sim: future rounds save 1/2 seeds instead of greedy best-available""")
+#### Safety: `win_prob × (1 - 0.7×FV) × surv × region_pen × scarcity`
+#### Leverage: `(1-opp)^1.5 × min(wp, 0.85)^0.5 × (1 - 0.7×FV) × surv^0.5 × region_pen × scarcity`
+- Contrarian exponent 1.5: steep — 10% ownership ≫ 1% (rewards close-game picks)
+- wp capped at 85% + sqrt: 99% and 59% close in score (leverage ≠ blowouts)
+- FV penalty 70%: never burn premium teams early
+#### Region Penalty: avoids stacking picks from one region (1 prior=0.85, 2=0.60, 3+=0.40)
+#### Pick Scarcity: checks if picking this team leaves you with enough future options (0=death, 5+=fine)
+#### Smart Sim: future rounds save 1/2 seeds + prefer underused regions""")
 
 st.markdown("---")
 st.caption("Survivor Engine v4.0 | Multi-contest | Smart sim + FV + Safety/Leverage | ESPN auto-update")
