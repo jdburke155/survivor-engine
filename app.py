@@ -8,6 +8,12 @@ import os
 import time
 from datetime import datetime, date
 
+try:
+    from streamlit_autorefresh import st_autorefresh
+    HAS_AUTOREFRESH = True
+except ImportError:
+    HAS_AUTOREFRESH = False
+
 st.set_page_config(page_title="MM Survivor Engine", layout="wide", page_icon="🏀")
 SPREAD_SIGMA = 11.0
 SAVE_FILE = "survivor_state.json"
@@ -954,6 +960,22 @@ with tab_picks:
 # ═══════════════════════════════════════════════════════════
 with tab_sweat:
     st.markdown(f"### 🔥 Sweat Board — {C.get('contest_name','')}")
+
+    # Live refresh controls
+    ref_col1, ref_col2 = st.columns([2, 3])
+    with ref_col1:
+        live_mode = st.toggle("🔴 Live Refresh", value=st.session_state.get("live_mode", False), key="live_mode")
+    with ref_col2:
+        if live_mode:
+            if HAS_AUTOREFRESH:
+                count = st_autorefresh(interval=15_000, limit=None, key="sweat_refresh")
+                st.caption(f"Auto-refreshing every 15s · ESPN cache: 2min · Updated: {datetime.now().strftime('%I:%M:%S %p')}")
+            else:
+                st.warning("Install `streamlit-autorefresh` for live mode: `pip install streamlit-autorefresh`")
+                if st.button("🔄 Manual Refresh"): st.rerun()
+        else:
+            if st.button("🔄 Refresh Now"): st.rerun()
+
     sweat_day = st.selectbox("Day", TOURNAMENT_DAYS, index=st.session_state.current_day_idx,
         format_func=lambda x: f"{x} — {ROUND_NAMES[x]}", key="sweat_day")
     mp = C.get("my_picks", {})
