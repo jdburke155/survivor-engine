@@ -729,7 +729,7 @@ with st.sidebar:
     C = ctx()  # Refresh after potential switch
 
     # Contest name editor
-    new_name = st.text_input("Contest name", value=C.get("contest_name", ""), key="cname_input")
+    new_name = st.text_input("Contest name", value=C.get("contest_name", ""), key=f"cname_{st.session_state.active_contest}")
     if new_name != C.get("contest_name", ""):
         C["contest_name"] = new_name
 
@@ -757,8 +757,8 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("## ⚙️ Contest Settings")
-    C["total_entries"] = st.number_input("Pool entries remaining", 1, 50000, C.get("total_entries", 900), 1)
-    C["my_entries"] = st.number_input("My entries remaining", 0, 20, C.get("my_entries", 3), 1)
+    C["total_entries"] = st.number_input("Pool entries remaining", 1, 50000, C.get("total_entries", 900), 1, key=f"total_{st.session_state.active_contest}")
+    C["my_entries"] = st.number_input("My entries remaining", 0, 20, C.get("my_entries", 3), 1, key=f"myent_{st.session_state.active_contest}")
 
     st.markdown("---")
     st.markdown("## 🔬 Sim Settings")
