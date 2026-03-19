@@ -881,11 +881,11 @@ with tab_picks:
             ca, cb = st.columns(2)
             with ca:
                 ka = f"{pick_tab_day}|{ta}"
-                na = st.number_input(f"{sas}{ta}", 0, C["total_entries"], pc.get(ka,0), 1, key=f"pc_{ka}")
+                na = st.number_input(f"{sas}{ta}", 0, C["total_entries"], pc.get(ka,0), 1, key=f"pc_{st.session_state.active_contest}_{ka}")
                 pc[ka] = na
             with cb:
                 kb = f"{pick_tab_day}|{tb}"
-                nb = st.number_input(f"{sbs}{tb}", 0, C["total_entries"], pc.get(kb,0), 1, key=f"pc_{kb}")
+                nb = st.number_input(f"{sbs}{tb}", 0, C["total_entries"], pc.get(kb,0), 1, key=f"pc_{st.session_state.active_contest}_{kb}")
                 pc[kb] = nb
         C["pick_counts"] = pc
         st.markdown("---")
