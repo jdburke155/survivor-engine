@@ -316,6 +316,23 @@ def fetch_all():
             if s: out[dl] = s
     return out
 
+def parse_time_sort(t):
+    """Convert '1:30 PM' to sortable 24h int (1330). TBD sorts last."""
+    if not t or t == "TBD": return 9999
+    try:
+        parts = t.replace(".", "").upper().split()
+        hm = parts[0].split(":")
+        h = int(hm[0]); m = int(hm[1]) if len(hm) > 1 else 0
+        ampm = parts[1] if len(parts) > 1 else "PM"
+        if ampm == "PM" and h != 12: h += 12
+        elif ampm == "AM" and h == 12: h = 0
+        return h * 100 + m
+    except: return 9999
+
+def game_sort_key(item):
+    """Sort key for (gid, game) tuples — chronological by tip time."""
+    return parse_time_sort(item[1].get("time", "TBD"))
+
 def match_results(espn, bracket):
     winners = {}; losers = {}
     for gid, g in bracket.items():
@@ -812,7 +829,7 @@ with tab_games:
     st.markdown(f"### {current_day} — {ROUND_NAMES[current_day]}")
     tg = {gid:g for gid,g in live_bracket.items() if g.get("day")==current_day}
     if tg:
-        for gid, g in sorted(tg.items(), key=lambda x: x[1].get("time","")):
+        for gid, g in sorted(tg.items(), key=game_sort_key):
             ta,tb = g["team_a"],g["team_b"]
             ok = f"spread_{gid}"
             cs = st.session_state.spread_overrides.get(ok, g.get("spread"))
@@ -850,7 +867,7 @@ with tab_picks:
     pc = C.get("pick_counts", {})
     if day_games:
         st.markdown("#### Pool Pick Counts")
-        for gid, g in sorted(day_games.items(), key=lambda x: x[1].get("time","")):
+        for gid, g in sorted(day_games.items(), key=game_sort_key):
             ta, tb = g["team_a"], g["team_b"]
             if "W(" in ta or "W(" in tb: continue
             sas = f"({g['seed_a']}) " if g.get("seed_a") else ""
@@ -871,7 +888,7 @@ with tab_picks:
         if total_today > 0 and total_today != C["total_entries"]:
             st.warning(f"Total ({total_today}) ≠ pool size ({C['total_entries']}). Fine if some entries already eliminated.")
         pick_data = []
-        for gid, g in sorted(day_games.items(), key=lambda x: x[1].get("time","")):
+        for gid, g in sorted(day_games.items(), key=game_sort_key):
             ta, tb = g["team_a"], g["team_b"]
             if "W(" in ta: continue
             for t, s in [(ta, g.get("seed_a")), (tb, g.get("seed_b"))]:
@@ -952,7 +969,7 @@ with tab_sweat:
     pc = C.get("pick_counts", {})
     total_picks_day = sum(pc.get(f"{sweat_day}|{t}", 0) for g in day_games.values() for t in [g["team_a"],g["team_b"]] if "W(" not in t)
     if day_games:
-        for gid, g in sorted(day_games.items(), key=lambda x: x[1].get("time","")):
+        for gid, g in sorted(day_games.items(), key=game_sort_key):
             ta, tb = g["team_a"], g["team_b"]
             if "W(" in ta: continue
             sas = f"({g['seed_a']})" if g.get("seed_a") else ""
