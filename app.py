@@ -202,6 +202,11 @@ def compute_day_conflicts(team, used_teams):
     """
     Check if picking this team creates day conflicts in future rounds.
     Returns dict with warnings for any round where used picks pile up on the same day.
+
+    Only flags E8 day conflicts when 2+ prior picks already land on the same E8 day,
+    meaning this pick would be the 3rd+ team competing for that single E8 slot.
+    FF and Championship are single-day rounds — no meaningful day conflict possible
+    (bracket-side conflicts are handled by check_championship_feasibility instead).
     """
     team_sched = get_team_schedule(team)
     if not team_sched: return {}
@@ -220,7 +225,8 @@ def compute_day_conflicts(team, used_teams):
         if not day: continue
         key = f"{rnd}|{day}"
         existing = used_by_day.get(key, 0)
-        if existing >= 1 and rnd in ["E8", "FF"]:
+        # Only flag E8: 2+ picks already on this E8 day means real congestion
+        if existing >= 2 and rnd == "E8":
             conflicts[rnd] = f"Already have {existing} pick(s) on {day} for {rnd}"
     return conflicts
 
@@ -1224,5 +1230,5 @@ Each contest has independent: pool size, entry count, pick counts, and personal 
 #### Smart Sim: future rounds save 1/2 seeds + prefer underused regions""")
 
 st.markdown("---")
-st.caption("Survivor Engine v4.0 | Multi-contest | Smart sim + FV + Safety/Leverage | ESPN auto-update")
+st.caption("Survivor Engine v4.1 | Multi-contest | Smart sim + FV + Safety/Leverage | ESPN auto-update | Day conflict fix")
 save_state()
