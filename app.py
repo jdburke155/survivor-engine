@@ -234,6 +234,41 @@ SUNDAY_GAMES = [
     {"game": "(4) Alabama vs (5) Texas Tech", "time": "9:45 PM ET", "teams": ["Alabama", "Texas Tech"], "seeds": [4, 5]},
 ]
 
+# ─── Bracket Schedule: Which future day does each team play? ─────────────────
+# Regions: South (Houston), West (San Jose), Midwest (Chicago), East (DC)
+# Thu S16 / Sat E8 = South + West regions
+# Fri S16 / Sun E8 = Midwest + East regions
+BRACKET_SCHEDULE = {
+    # Thursday S16 / Saturday E8 — SOUTH region
+    "Houston":      {"region": "South", "s16_day": "Thu", "e8_day": "Sat"},
+    "Illinois":     {"region": "South", "s16_day": "Thu", "e8_day": "Sat"},
+    "Nebraska":     {"region": "South", "s16_day": "Thu", "e8_day": "Sat"},
+    "Florida":      {"region": "South", "s16_day": "Thu", "e8_day": "Sat"},
+    "Iowa":         {"region": "South", "s16_day": "Thu", "e8_day": "Sat"},
+    # Thursday S16 / Saturday E8 — WEST region
+    "Arkansas":     {"region": "West",  "s16_day": "Thu", "e8_day": "Sat"},
+    "Arizona":      {"region": "West",  "s16_day": "Thu", "e8_day": "Sat"},
+    "Utah State":   {"region": "West",  "s16_day": "Thu", "e8_day": "Sat"},
+    "Texas":        {"region": "West",  "s16_day": "Thu", "e8_day": "Sat"},
+    "Purdue":       {"region": "West",  "s16_day": "Thu", "e8_day": "Sat"},
+    "Miami":        {"region": "West",  "s16_day": "Thu", "e8_day": "Sat"},
+    # Friday S16 / Sunday E8 — EAST region
+    "Duke":         {"region": "East",    "s16_day": "Fri", "e8_day": "Sun"},
+    "Kansas":       {"region": "East",    "s16_day": "Fri", "e8_day": "Sun"},
+    "St. John's":   {"region": "East",    "s16_day": "Fri", "e8_day": "Sun"},
+    "Michigan State":{"region": "East",   "s16_day": "Fri", "e8_day": "Sun"},
+    "Connecticut":  {"region": "East",    "s16_day": "Fri", "e8_day": "Sun"},
+    "UCLA":         {"region": "East",    "s16_day": "Fri", "e8_day": "Sun"},
+    # Friday S16 / Sunday E8 — MIDWEST region
+    "Michigan":     {"region": "Midwest", "s16_day": "Fri", "e8_day": "Sun"},
+    "Alabama":      {"region": "Midwest", "s16_day": "Fri", "e8_day": "Sun"},
+    "Texas Tech":   {"region": "Midwest", "s16_day": "Fri", "e8_day": "Sun"},
+    "Iowa State":   {"region": "Midwest", "s16_day": "Fri", "e8_day": "Sun"},
+    "Kentucky":     {"region": "Midwest", "s16_day": "Fri", "e8_day": "Sun"},
+    "Virginia":     {"region": "Midwest", "s16_day": "Fri", "e8_day": "Sun"},
+    "Tennessee":    {"region": "Midwest", "s16_day": "Fri", "e8_day": "Sun"},
+}
+
 # ─── Opponent Pick Data from Screenshots (Sleeping Beauty - 1,815 entries) ───
 
 SLEEPING_BEAUTY = {
@@ -363,6 +398,7 @@ SPLASH_CONTEST = {
                 ("Texas A&M", {"count": 1, "pct": 0.001, "result": "W"}),
                 ("Troy", {"count": 1, "pct": 0.001, "result": "L"}),
                 ("TCU", {"count": 1, "pct": 0.001, "result": "W"}),
+                ("NO PICK", {"count": 1, "pct": 0.001, "result": "L"}),
             ]),
         },
         "Friday": {
@@ -389,6 +425,7 @@ SPLASH_CONTEST = {
                 ("Missouri", {"count": 1, "pct": 0.002, "result": "L"}),
                 ("Florida", {"count": 1, "pct": 0.002, "result": "W"}),
                 ("Clemson", {"count": 1, "pct": 0.002, "result": "L"}),
+                ("NO PICK", {"count": 31, "pct": 0.048, "result": "L"}),
             ]),
         },
         "Saturday": {
@@ -412,6 +449,7 @@ SPLASH_CONTEST = {
                 ("TCU", {"count": 0, "pct": 0.000, "result": "L"}),
                 ("Texas A&M", {"count": 0, "pct": 0.000, "result": "L"}),
                 ("High Point", {"count": 0, "pct": 0.000, "result": "L"}),
+                ("NO PICK", {"count": 17, "pct": 0.028, "result": "L"}),
             ]),
         },
         "Sunday": {
@@ -549,34 +587,56 @@ def get_available_sunday_teams(used_teams):
 
 
 def seed_to_win_prob(seed, opp_seed):
-    """Rough win probability based on seed matchup."""
-    # Using historical seed-based win probabilities for R32
-    seed_strength = {1: 0.88, 2: 0.82, 3: 0.75, 4: 0.68, 5: 0.62,
-                     6: 0.55, 7: 0.52, 8: 0.48, 9: 0.45, 10: 0.38,
-                     11: 0.32, 12: 0.28}
-    # Adjust for actual matchup
-    my_str = seed_strength.get(seed, 0.40)
-    opp_str = seed_strength.get(opp_seed, 0.40)
+    """Win probability based on seed matchup in R32.
+    
+    Uses historical R32 win rates calibrated to actual outcomes.
+    A 1-seed vs 9-seed should be ~75%, not the 66% the old model gave.
+    """
+    # KenPom-style strength ratings tuned for R32 matchups
+    # These yield: 1v9=75%, 2v7=65%, 3v6=60%, 4v5=56%
+    seed_strength = {
+        1: 1.00, 2: 0.85, 3: 0.75, 4: 0.65, 5: 0.55,
+        6: 0.48, 7: 0.42, 8: 0.35, 9: 0.33, 10: 0.28,
+        11: 0.22, 12: 0.18,
+    }
+    my_str = seed_strength.get(seed, 0.30)
+    opp_str = seed_strength.get(opp_seed, 0.30)
     wp = my_str / (my_str + opp_str)
     return round(wp, 3)
 
 
 def future_value_score(seed, rounds_remaining=4):
-    """Score 0.0-1.0: how valuable is this team to save for later?"""
-    # Higher seeds have more FV early in tournament
+    """Score 0.0-1.0: how valuable is this team to save for later?
+    
+    Higher seeds are more valuable to preserve for later rounds
+    when there are fewer safe picks available.
+    """
     seed_base = max(0, (13 - seed) / 12)  # 1-seed = 1.0, 12-seed = 0.08
     round_factor = min(1.0, rounds_remaining / 4)
     return round(seed_base * round_factor, 3)
 
 
 def safety_score(win_prob, opp_pct, fv, survival=1.0):
-    """Safety pick score: maximize survival probability."""
-    return win_prob * (1 - 0.7 * fv) * (0.3 + 0.7 * survival)
+    """Safety pick score: maximize survival probability.
+    
+    Win probability is DOMINANT. FV is a gentle tiebreaker (max 15% discount).
+    A 1-seed at 75% win prob should always outscore a 9-seed at 25%,
+    regardless of future value.
+    
+    Old formula: wp * (1 - 0.7*fv) crushed 1-seeds to 0.3x multiplier.
+    New formula: wp * (1 - 0.15*fv) gives 1-seeds a 0.85x multiplier.
+    """
+    return win_prob * (1 - 0.15 * fv) * (0.3 + 0.7 * survival)
 
 
 def leverage_score(win_prob, opp_pct, fv, survival=1.0):
-    """Leverage pick score: maximize edge over field."""
-    return ((1 - opp_pct) ** 0.6) * win_prob * (1 - 0.5 * fv) * (survival ** 0.5)
+    """Leverage pick score: maximize edge over field.
+    
+    FV matters more here (30% max discount) because leverage is about
+    long-run strategy. But win_prob still dominates — you can't gain
+    leverage by picking a team that loses.
+    """
+    return ((1 - opp_pct) ** 0.6) * win_prob * (1 - 0.3 * fv) * (survival ** 0.5)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -686,9 +746,9 @@ def render_opponent_picks(day_name, day_data, total_entries):
 
 
 def render_sunday_recommendations(entry_name, entry_data, contest_data):
-    """Show Sunday pick recommendations for a live entry."""
-    used = entry_data.get("used_teams", [])
-    available = get_available_sunday_teams(used)
+    """Show Sunday pick recommendations for a live entry, with schedule awareness."""
+    used = set(entry_data.get("used_teams", []))
+    available = get_available_sunday_teams(list(used))
     
     if not available:
         st.warning(f"No available teams for Sunday for {entry_name}!")
@@ -697,8 +757,21 @@ def render_sunday_recommendations(entry_name, entry_data, contest_data):
     # Get Sunday opponent picks if available
     sunday_picks = contest_data["days"]["Sunday"]["picks"]
     
+    # Count available teams for each future S16 day BEFORE today's pick
+    thu_teams_available = {t for t in BRACKET_SCHEDULE 
+                          if BRACKET_SCHEDULE[t]["s16_day"] == "Thu" and t not in used}
+    fri_teams_available = {t for t in BRACKET_SCHEDULE 
+                          if BRACKET_SCHEDULE[t]["s16_day"] == "Fri" and t not in used}
+    
     st.markdown(f"### 🎯 Sunday Recommendations — {entry_name}")
-    st.caption(f"Used teams: {', '.join(used)}")
+    st.caption(f"Used teams: {', '.join(sorted(used))}")
+    
+    # Show schedule depth
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown(f"**Thu S16 pool**: {len(thu_teams_available)} teams available")
+    with col_b:
+        st.markdown(f"**Fri S16 pool**: {len(fri_teams_available)} teams available")
     
     recs = []
     for t in available:
@@ -708,6 +781,8 @@ def render_sunday_recommendations(entry_name, entry_data, contest_data):
         time = t["time"]
         
         # Find opponent seed
+        opp_team = ""
+        opp_seed = seed
         for g in SUNDAY_GAMES:
             if team in g["teams"]:
                 idx = g["teams"].index(team)
@@ -719,11 +794,21 @@ def render_sunday_recommendations(entry_name, entry_data, contest_data):
         wp = seed_to_win_prob(seed, opp_seed)
         fv = future_value_score(seed, rounds_remaining=4)
         
+        # Schedule info
+        sched = BRACKET_SCHEDULE.get(team, {})
+        s16_day = sched.get("s16_day", "?")
+        region = sched.get("region", "?")
+        
+        # How many teams remain in that day's pool AFTER this pick?
+        if s16_day == "Thu":
+            remaining_pool = len(thu_teams_available - {team})
+        else:
+            remaining_pool = len(fri_teams_available - {team})
+        
         # Use opponent pick % if available, otherwise estimate from seed
         if sunday_picks and team in sunday_picks:
             opp_pct = sunday_picks[team]["pct"]
         else:
-            # Estimate: higher seeds get more picks
             opp_pct = max(0.01, (13 - seed) / 80)
         
         s_score = safety_score(wp, opp_pct, fv)
@@ -741,6 +826,9 @@ def render_sunday_recommendations(entry_name, entry_data, contest_data):
             "opp_pct": opp_pct,
             "safety": s_score,
             "leverage": l_score,
+            "s16_day": s16_day,
+            "region": region,
+            "remaining_pool": remaining_pool,
         })
     
     # Sort by safety score
@@ -751,19 +839,23 @@ def render_sunday_recommendations(entry_name, entry_data, contest_data):
     
     with col1:
         st.markdown("#### 🛡️ Safety Picks")
-        st.caption("Maximize win probability × future value preservation")
+        st.caption("Maximize win probability, gentle FV tiebreaker")
         for i, r in enumerate(safety_sorted[:5]):
             tag = '🥇' if i == 0 else ('🥈' if i == 1 else '🥉' if i == 2 else '  ')
-            fv_warning = " ⚠️ HIGH FV" if r["fv"] > 0.6 else ""
+            pool_warn = ""
+            if r["remaining_pool"] <= 3:
+                pool_warn = f" ⚠️ leaves {r['remaining_pool']} {r['s16_day']} S16 options"
             st.markdown(f"""
             <div style="background:#0f2a1e; border-radius:8px; padding:10px 14px; margin:4px 0; border-left:3px solid #10b981;">
                 <div style="color:#6ee7b7; font-weight:700;">{tag} ({r['seed']}) {r['team']}</div>
                 <div style="color:#9ca3af; font-size:0.85em;">
                     vs ({r['opp_seed']}) {r['opponent']} · {r['time']}<br/>
                     Win: <strong style="color:#60a5fa;">{r['win_prob']:.0%}</strong> · 
-                    FV: {r['fv']:.2f}{fv_warning} · 
+                    FV: {r['fv']:.2f} · 
                     Field: ~{r['opp_pct']:.0%}<br/>
                     <span class="safety-tag">Safety: {r['safety']:.3f}</span>
+                    <span style="background:#1e293b;color:#94a3b8;padding:2px 6px;border-radius:4px;font-size:0.75em;margin-left:4px;">{r['s16_day']} S16 · {r['region']}</span>
+                    <span style="color:#6b7280;font-size:0.75em;">{pool_warn}</span>
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -773,6 +865,9 @@ def render_sunday_recommendations(entry_name, entry_data, contest_data):
         st.caption("Maximize edge over opponent field")
         for i, r in enumerate(leverage_sorted[:5]):
             tag = '🥇' if i == 0 else ('🥈' if i == 1 else '🥉' if i == 2 else '  ')
+            pool_warn = ""
+            if r["remaining_pool"] <= 3:
+                pool_warn = f" ⚠️ leaves {r['remaining_pool']} {r['s16_day']} S16 options"
             st.markdown(f"""
             <div style="background:#1e1b4b; border-radius:8px; padding:10px 14px; margin:4px 0; border-left:3px solid #6366f1;">
                 <div style="color:#a5b4fc; font-weight:700;">{tag} ({r['seed']}) {r['team']}</div>
@@ -782,12 +877,15 @@ def render_sunday_recommendations(entry_name, entry_data, contest_data):
                     FV: {r['fv']:.2f} · 
                     Field: ~{r['opp_pct']:.0%}<br/>
                     <span class="leverage-tag">Leverage: {r['leverage']:.3f}</span>
+                    <span style="background:#1e293b;color:#94a3b8;padding:2px 6px;border-radius:4px;font-size:0.75em;margin-left:4px;">{r['s16_day']} S16 · {r['region']}</span>
+                    <span style="color:#6b7280;font-size:0.75em;">{pool_warn}</span>
                 </div>
             </div>
             """, unsafe_allow_html=True)
     
-    st.markdown("---")
-    st.caption("⚠️ Sunday opponent pick data not yet loaded. Recommendations use seed-based estimates. Upload Sunday screenshot to refine.")
+    if not sunday_picks:
+        st.markdown("---")
+        st.caption("⚠️ Sunday opponent pick data not yet loaded. Field % uses seed-based estimates. Upload Sunday screenshot to refine.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
