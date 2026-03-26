@@ -222,59 +222,84 @@ GAME_RESULTS = {
     "Northern Iowa": {"seed": None, "won_r64": False, "alive": False},
 }
 
-# Sunday R32 games (TODAY - March 22, 2026)
-SUNDAY_GAMES = [
-    {"game": "(2) Purdue vs (7) Miami", "time": "12:10 PM ET", "teams": ["Purdue", "Miami"], "seeds": [2, 7]},
-    {"game": "(2) Iowa State vs (7) Kentucky", "time": "2:45 PM ET", "teams": ["Iowa State", "Kentucky"], "seeds": [2, 7]},
-    {"game": "(4) Kansas vs (5) St. John's", "time": "5:15 PM ET", "teams": ["Kansas", "St. John's"], "seeds": [4, 5]},
-    {"game": "(3) Virginia vs (6) Tennessee", "time": "6:10 PM ET", "teams": ["Virginia", "Tennessee"], "seeds": [3, 6]},
-    {"game": "(1) Florida vs (9) Iowa", "time": "7:10 PM ET", "teams": ["Florida", "Iowa"], "seeds": [1, 9]},
-    {"game": "(1) Arizona vs (9) Utah State", "time": "7:50 PM ET", "teams": ["Arizona", "Utah State"], "seeds": [1, 9]},
-    {"game": "(2) UConn vs (7) UCLA", "time": "8:45 PM ET", "teams": ["Connecticut", "UCLA"], "seeds": [2, 7]},
-    {"game": "(4) Alabama vs (5) Texas Tech", "time": "9:45 PM ET", "teams": ["Alabama", "Texas Tech"], "seeds": [4, 5]},
+# Sunday R32 results (March 22, 2026) — COMPLETED
+SUNDAY_RESULTS = {
+    "Purdue": "W", "Miami": "L",         # Purdue beat Miami
+    "Iowa State": "W", "Kentucky": "L",   # Iowa State beat Kentucky
+    "St. John's": "W", "Kansas": "L",     # St. John's upset Kansas
+    "Tennessee": "W", "Virginia": "L",    # Tennessee beat Virginia
+    "Iowa": "W", "Florida": "L",          # Iowa upset #1 Florida!
+    "Arizona": "W", "Utah State": "L",    # Arizona beat Utah State
+    "Connecticut": "W", "UCLA": "L",      # UConn beat UCLA
+    "Alabama": "W", "Texas Tech": "L",    # Alabama beat Texas Tech
+}
+
+# ─── Current Round: Sweet 16 (March 26-27, 2026) ────────────────────────────
+CURRENT_ROUND = "Sweet 16"
+CURRENT_ROUND_LABEL = "Sweet 16 · March 26-27"
+
+NEXT_ROUND_GAMES = [
+    # Thursday March 26 — SOUTH region (Houston)
+    {"game": "(2) Houston vs (3) Illinois", "time": "Thu ~7:10 PM ET", "day": "Thursday",
+     "teams": ["Houston", "Illinois"], "seeds": [2, 3], "region": "South"},
+    {"game": "(4) Nebraska vs (9) Iowa", "time": "Thu ~9:40 PM ET", "day": "Thursday",
+     "teams": ["Nebraska", "Iowa"], "seeds": [4, 9], "region": "South"},
+    # Thursday March 26 — WEST region (San Jose)
+    {"game": "(4) Arkansas vs (1) Arizona", "time": "Thu ~7:10 PM ET", "day": "Thursday",
+     "teams": ["Arkansas", "Arizona"], "seeds": [4, 1], "region": "West"},
+    {"game": "(11) Texas vs (2) Purdue", "time": "Thu ~9:40 PM ET", "day": "Thursday",
+     "teams": ["Texas", "Purdue"], "seeds": [11, 2], "region": "West"},
+    # Friday March 27 — EAST region (DC)
+    {"game": "(1) Duke vs (5) St. John's", "time": "Fri ~7:10 PM ET", "day": "Friday",
+     "teams": ["Duke", "St. John's"], "seeds": [1, 5], "region": "East"},
+    {"game": "(3) Michigan St vs (2) UConn", "time": "Fri ~9:40 PM ET", "day": "Friday",
+     "teams": ["Michigan State", "Connecticut"], "seeds": [3, 2], "region": "East"},
+    # Friday March 27 — MIDWEST region (Chicago)
+    {"game": "(1) Michigan vs (4) Alabama", "time": "Fri ~7:10 PM ET", "day": "Friday",
+     "teams": ["Michigan", "Alabama"], "seeds": [1, 4], "region": "Midwest"},
+    {"game": "(2) Iowa State vs (6) Tennessee", "time": "Fri ~9:40 PM ET", "day": "Friday",
+     "teams": ["Iowa State", "Tennessee"], "seeds": [2, 6], "region": "Midwest"},
 ]
 
-# ─── Bracket Schedule: Which future day does each team play? ─────────────────
-# Regions: South (Houston), West (San Jose), Midwest (Chicago), East (DC)
-# Thu S16 / Sat E8 = South + West regions
-# Fri S16 / Sun E8 = Midwest + East regions
+# ─── Bracket Schedule: Which day does each team play in S16 and E8? ──────────
+# Thu S16 / Sat E8 = South (Houston) + West (San Jose)
+# Fri S16 / Sun E8 = East (DC) + Midwest (Chicago)
+# S16 matchups determine E8 pairings within each region.
 BRACKET_SCHEDULE = {
-    # Thursday S16 / Saturday E8 — SOUTH region
-    "Houston":      {"region": "South", "s16_day": "Thu", "e8_day": "Sat"},
-    "Illinois":     {"region": "South", "s16_day": "Thu", "e8_day": "Sat"},
-    "Nebraska":     {"region": "South", "s16_day": "Thu", "e8_day": "Sat"},
-    "Florida":      {"region": "South", "s16_day": "Thu", "e8_day": "Sat"},
-    "Iowa":         {"region": "South", "s16_day": "Thu", "e8_day": "Sat"},
-    # Thursday S16 / Saturday E8 — WEST region
-    "Arkansas":     {"region": "West",  "s16_day": "Thu", "e8_day": "Sat"},
-    "Arizona":      {"region": "West",  "s16_day": "Thu", "e8_day": "Sat"},
-    "Utah State":   {"region": "West",  "s16_day": "Thu", "e8_day": "Sat"},
-    "Texas":        {"region": "West",  "s16_day": "Thu", "e8_day": "Sat"},
-    "Purdue":       {"region": "West",  "s16_day": "Thu", "e8_day": "Sat"},
-    "Miami":        {"region": "West",  "s16_day": "Thu", "e8_day": "Sat"},
-    # Friday S16 / Sunday E8 — EAST region
-    "Duke":         {"region": "East",    "s16_day": "Fri", "e8_day": "Sun"},
-    "Kansas":       {"region": "East",    "s16_day": "Fri", "e8_day": "Sun"},
-    "St. John's":   {"region": "East",    "s16_day": "Fri", "e8_day": "Sun"},
-    "Michigan State":{"region": "East",   "s16_day": "Fri", "e8_day": "Sun"},
-    "Connecticut":  {"region": "East",    "s16_day": "Fri", "e8_day": "Sun"},
-    "UCLA":         {"region": "East",    "s16_day": "Fri", "e8_day": "Sun"},
-    # Friday S16 / Sunday E8 — MIDWEST region
-    "Michigan":     {"region": "Midwest", "s16_day": "Fri", "e8_day": "Sun"},
-    "Alabama":      {"region": "Midwest", "s16_day": "Fri", "e8_day": "Sun"},
-    "Texas Tech":   {"region": "Midwest", "s16_day": "Fri", "e8_day": "Sun"},
-    "Iowa State":   {"region": "Midwest", "s16_day": "Fri", "e8_day": "Sun"},
-    "Kentucky":     {"region": "Midwest", "s16_day": "Fri", "e8_day": "Sun"},
-    "Virginia":     {"region": "Midwest", "s16_day": "Fri", "e8_day": "Sun"},
-    "Tennessee":    {"region": "Midwest", "s16_day": "Fri", "e8_day": "Sun"},
+    # SOUTH — Thu S16 / Sat E8 (Houston)
+    "Houston":       {"region": "South",   "s16_day": "Thu", "e8_day": "Sat", "alive": True},
+    "Illinois":      {"region": "South",   "s16_day": "Thu", "e8_day": "Sat", "alive": True},
+    "Nebraska":      {"region": "South",   "s16_day": "Thu", "e8_day": "Sat", "alive": True},
+    "Iowa":          {"region": "South",   "s16_day": "Thu", "e8_day": "Sat", "alive": True},
+    # WEST — Thu S16 / Sat E8 (San Jose)
+    "Arkansas":      {"region": "West",    "s16_day": "Thu", "e8_day": "Sat", "alive": True},
+    "Arizona":       {"region": "West",    "s16_day": "Thu", "e8_day": "Sat", "alive": True},
+    "Texas":         {"region": "West",    "s16_day": "Thu", "e8_day": "Sat", "alive": True},
+    "Purdue":        {"region": "West",    "s16_day": "Thu", "e8_day": "Sat", "alive": True},
+    # EAST — Fri S16 / Sun E8 (DC)
+    "Duke":          {"region": "East",    "s16_day": "Fri", "e8_day": "Sun", "alive": True},
+    "St. John's":    {"region": "East",    "s16_day": "Fri", "e8_day": "Sun", "alive": True},
+    "Michigan State": {"region": "East",   "s16_day": "Fri", "e8_day": "Sun", "alive": True},
+    "Connecticut":   {"region": "East",    "s16_day": "Fri", "e8_day": "Sun", "alive": True},
+    # MIDWEST — Fri S16 / Sun E8 (Chicago)
+    "Michigan":      {"region": "Midwest", "s16_day": "Fri", "e8_day": "Sun", "alive": True},
+    "Alabama":       {"region": "Midwest", "s16_day": "Fri", "e8_day": "Sun", "alive": True},
+    "Iowa State":    {"region": "Midwest", "s16_day": "Fri", "e8_day": "Sun", "alive": True},
+    "Tennessee":     {"region": "Midwest", "s16_day": "Fri", "e8_day": "Sun", "alive": True},
 }
+
+# E8 pairings (within each region, S16 winners meet):
+# South E8: Houston/Illinois winner vs Nebraska/Iowa winner
+# West E8: Arkansas/Arizona winner vs Texas/Purdue winner
+# East E8: Duke/StJohns winner vs MichSt/UConn winner
+# Midwest E8: Michigan/Alabama winner vs IowaState/Tennessee winner
 
 # ─── Opponent Pick Data from Screenshots (Sleeping Beauty - 1,815 entries) ───
 
 SLEEPING_BEAUTY = {
     "name": "Sleeping Beauty",
     "total_entries": 1815,
-    "survivor_snapshots": {"Thursday": None, "Friday": None, "Saturday": None},
+    "survivor_snapshots": {"Thursday": None, "Friday": None, "Saturday": None, "Sunday": 764},
     "days": {
         "Thursday": {
             "round": "R64",
@@ -359,7 +384,23 @@ SLEEPING_BEAUTY = {
         "Sunday": {
             "round": "R32",
             "date": "2026-03-22",
-            "picks": OrderedDict(),  # AWAITING SCREENSHOT
+            "survivors_header": {"survivors": 764, "eliminated_total": 1051, "day4_losses": 205, "missing": 8},
+            "picks": OrderedDict([
+                ("Purdue", {"count": 191, "pct": 0.20, "result": "W"}),
+                ("Connecticut", {"count": 177, "pct": 0.18, "result": "W"}),
+                ("Iowa State", {"count": 136, "pct": 0.14, "result": "W"}),
+                ("St. John's", {"count": 130, "pct": 0.13, "result": "W"}),
+                ("Texas Tech", {"count": 59, "pct": 0.06, "result": "L"}),
+                ("Virginia", {"count": 58, "pct": 0.06, "result": "L"}),
+                ("Florida", {"count": 58, "pct": 0.06, "result": "L"}),
+                ("Tennessee", {"count": 54, "pct": 0.06, "result": "W"}),
+                ("Alabama", {"count": 40, "pct": 0.04, "result": "W"}),
+                ("Arizona", {"count": 36, "pct": 0.04, "result": "W"}),
+                ("Kansas", {"count": 13, "pct": 0.01, "result": "L"}),
+                ("UCLA", {"count": 8, "pct": 0.01, "result": "L"}),
+                ("NO PICK", {"count": 8, "pct": 0.01, "result": "L"}),
+                ("Kentucky", {"count": 1, "pct": 0.00, "result": "L"}),
+            ]),
         },
     },
 }
@@ -369,7 +410,7 @@ SLEEPING_BEAUTY = {
 SPLASH_CONTEST = {
     "name": "Splash Contest",
     "total_entries": 845,
-    "survivor_snapshots": {"Thursday": None, "Friday": 607, "Saturday": 502},
+    "survivor_snapshots": {"Thursday": None, "Friday": 607, "Saturday": 502, "Sunday": 412},
     "days": {
         "Thursday": {
             "round": "R64",
@@ -455,7 +496,23 @@ SPLASH_CONTEST = {
         "Sunday": {
             "round": "R32",
             "date": "2026-03-22",
-            "picks": OrderedDict(),  # AWAITING SCREENSHOT
+            "picks": OrderedDict([
+                ("Purdue", {"count": 112, "pct": 0.223, "result": "W"}),
+                ("St. John's", {"count": 78, "pct": 0.155, "result": "W"}),
+                ("Connecticut", {"count": 78, "pct": 0.155, "result": "W"}),
+                ("Iowa State", {"count": 77, "pct": 0.153, "result": "W"}),
+                ("Florida", {"count": 43, "pct": 0.086, "result": "L"}),
+                ("Tennessee", {"count": 34, "pct": 0.068, "result": "W"}),
+                ("Texas Tech", {"count": 23, "pct": 0.046, "result": "L"}),
+                ("Alabama", {"count": 20, "pct": 0.040, "result": "W"}),
+                ("Arizona", {"count": 13, "pct": 0.026, "result": "W"}),
+                ("Virginia", {"count": 12, "pct": 0.024, "result": "L"}),
+                ("UCLA", {"count": 3, "pct": 0.006, "result": "L"}),
+                ("Kansas", {"count": 2, "pct": 0.004, "result": "L"}),
+                ("Kentucky", {"count": 1, "pct": 0.002, "result": "L"}),
+                ("Miami", {"count": 1, "pct": 0.002, "result": "L"}),
+                ("NO PICK", {"count": 5, "pct": 0.010, "result": "L"}),
+            ]),
         },
     },
 }
@@ -474,8 +531,9 @@ MY_ENTRIES = {
                 "Thursday": {"team": "Nebraska", "result": "W"},
                 "Friday": {"team": "Tennessee", "result": "W"},
                 "Saturday": {"team": "Arkansas", "result": "W"},
+                "Sunday": {"team": "Connecticut", "result": "W"},
             },
-            "used_teams": ["Nebraska", "Tennessee", "Arkansas"],
+            "used_teams": ["Nebraska", "Tennessee", "Arkansas", "Connecticut"],
         },
         "Entry 2": {
             "alive": False,
@@ -512,8 +570,9 @@ MY_ENTRIES = {
                 "Thursday": {"team": "Arkansas", "result": "W"},
                 "Friday": {"team": "Kansas", "result": "W"},
                 "Saturday": {"team": "Illinois", "result": "W"},
+                "Sunday": {"team": "Connecticut", "result": "W"},
             },
-            "used_teams": ["Arkansas", "Kansas", "Illinois"],
+            "used_teams": ["Arkansas", "Kansas", "Illinois", "Connecticut"],
         },
         "Entry 3": {
             "alive": True,
@@ -521,17 +580,21 @@ MY_ENTRIES = {
                 "Thursday": {"team": "Vanderbilt", "result": "W"},
                 "Friday": {"team": "Connecticut", "result": "W"},
                 "Saturday": {"team": "Arkansas", "result": "W"},
+                "Sunday": {"team": "Iowa State", "result": "W"},
             },
-            "used_teams": ["Vanderbilt", "Connecticut", "Arkansas"],
+            "used_teams": ["Vanderbilt", "Connecticut", "Arkansas", "Iowa State"],
         },
         "Entry 4": {
-            "alive": True,
+            "alive": False,
+            "eliminated_day": "Sunday",
+            "eliminated_by": "Texas Tech lost to Alabama",
             "picks": {
                 "Thursday": {"team": "Nebraska", "result": "W"},
                 "Friday": {"team": "Tennessee", "result": "W"},
                 "Saturday": {"team": "Arkansas", "result": "W"},
+                "Sunday": {"team": "Texas Tech", "result": "L"},
             },
-            "used_teams": ["Nebraska", "Tennessee", "Arkansas"],
+            "used_teams": ["Nebraska", "Tennessee", "Arkansas", "Texas Tech"],
         },
         "Entry 5": {
             "alive": False,
@@ -571,19 +634,21 @@ def estimate_alive(contest_data):
     return total - sum(elim.values())
 
 
-def get_available_sunday_teams(used_teams):
-    """Get teams playing Sunday that haven't been used."""
-    all_sunday = []
-    for g in SUNDAY_GAMES:
+def get_available_next_round_teams(used_teams):
+    """Get teams playing in the next round that haven't been used."""
+    all_teams = []
+    for g in NEXT_ROUND_GAMES:
         for i, team in enumerate(g["teams"]):
             if team not in used_teams:
-                all_sunday.append({
+                all_teams.append({
                     "team": team,
                     "seed": g["seeds"][i],
                     "game": g["game"],
                     "time": g["time"],
+                    "day": g.get("day", ""),
+                    "region": g.get("region", ""),
                 })
-    return all_sunday
+    return all_teams
 
 
 def seed_to_win_prob(seed, opp_seed):
@@ -745,33 +810,30 @@ def render_opponent_picks(day_name, day_data, total_entries):
         """, unsafe_allow_html=True)
 
 
-def render_sunday_recommendations(entry_name, entry_data, contest_data):
-    """Show Sunday pick recommendations for a live entry, with schedule awareness."""
+def render_next_round_recommendations(entry_name, entry_data, contest_data):
+    """Show next-round pick recommendations for a live entry, with schedule awareness."""
     used = set(entry_data.get("used_teams", []))
-    available = get_available_sunday_teams(list(used))
+    available = get_available_next_round_teams(list(used))
     
     if not available:
-        st.warning(f"No available teams for Sunday for {entry_name}!")
+        st.warning(f"No available teams for {CURRENT_ROUND} for {entry_name}!")
         return
     
-    # Get Sunday opponent picks if available
-    sunday_picks = contest_data["days"]["Sunday"]["picks"]
-    
-    # Count available teams for each future S16 day BEFORE today's pick
+    # Count available teams for each game day AFTER this pick
     thu_teams_available = {t for t in BRACKET_SCHEDULE 
                           if BRACKET_SCHEDULE[t]["s16_day"] == "Thu" and t not in used}
     fri_teams_available = {t for t in BRACKET_SCHEDULE 
                           if BRACKET_SCHEDULE[t]["s16_day"] == "Fri" and t not in used}
     
-    st.markdown(f"### 🎯 Sunday Recommendations — {entry_name}")
+    st.markdown(f"### 🎯 {CURRENT_ROUND} Recommendations — {entry_name}")
     st.caption(f"Used teams: {', '.join(sorted(used))}")
     
     # Show schedule depth
     col_a, col_b = st.columns(2)
     with col_a:
-        st.markdown(f"**Thu S16 pool**: {len(thu_teams_available)} teams available")
+        st.markdown(f"**Thu S16 pool**: {len(thu_teams_available)} teams")
     with col_b:
-        st.markdown(f"**Fri S16 pool**: {len(fri_teams_available)} teams available")
+        st.markdown(f"**Fri S16 pool**: {len(fri_teams_available)} teams")
     
     recs = []
     for t in available:
@@ -779,11 +841,12 @@ def render_sunday_recommendations(entry_name, entry_data, contest_data):
         seed = t["seed"]
         game = t["game"]
         time = t["time"]
+        game_day = t.get("day", "")
         
         # Find opponent seed
         opp_team = ""
         opp_seed = seed
-        for g in SUNDAY_GAMES:
+        for g in NEXT_ROUND_GAMES:
             if team in g["teams"]:
                 idx = g["teams"].index(team)
                 opp_idx = 1 - idx
@@ -792,24 +855,25 @@ def render_sunday_recommendations(entry_name, entry_data, contest_data):
                 break
         
         wp = seed_to_win_prob(seed, opp_seed)
-        fv = future_value_score(seed, rounds_remaining=4)
+        # 3 rounds remaining after S16: E8, F4, Championship
+        fv = future_value_score(seed, rounds_remaining=3)
         
         # Schedule info
         sched = BRACKET_SCHEDULE.get(team, {})
         s16_day = sched.get("s16_day", "?")
         region = sched.get("region", "?")
         
-        # How many teams remain in that day's pool AFTER this pick?
+        # How many teams remain in the OTHER day's pool after using this team?
+        # (This team plays on s16_day; check if picking it thins tomorrow's options)
         if s16_day == "Thu":
-            remaining_pool = len(thu_teams_available - {team})
+            remaining_this_day = len(thu_teams_available - {team})
+            remaining_other_day = len(fri_teams_available)
         else:
-            remaining_pool = len(fri_teams_available - {team})
+            remaining_this_day = len(fri_teams_available - {team})
+            remaining_other_day = len(thu_teams_available)
         
-        # Use opponent pick % if available, otherwise estimate from seed
-        if sunday_picks and team in sunday_picks:
-            opp_pct = sunday_picks[team]["pct"]
-        else:
-            opp_pct = max(0.01, (13 - seed) / 80)
+        # Estimate opponent pick % from seed
+        opp_pct = max(0.01, (13 - seed) / 80)
         
         s_score = safety_score(wp, opp_pct, fv)
         l_score = leverage_score(wp, opp_pct, fv)
@@ -821,6 +885,7 @@ def render_sunday_recommendations(entry_name, entry_data, contest_data):
             "opp_seed": opp_seed,
             "game": game,
             "time": time,
+            "game_day": game_day,
             "win_prob": wp,
             "fv": fv,
             "opp_pct": opp_pct,
@@ -828,7 +893,8 @@ def render_sunday_recommendations(entry_name, entry_data, contest_data):
             "leverage": l_score,
             "s16_day": s16_day,
             "region": region,
-            "remaining_pool": remaining_pool,
+            "remaining_this_day": remaining_this_day,
+            "remaining_other_day": remaining_other_day,
         })
     
     # Sort by safety score
@@ -840,11 +906,11 @@ def render_sunday_recommendations(entry_name, entry_data, contest_data):
     with col1:
         st.markdown("#### 🛡️ Safety Picks")
         st.caption("Maximize win probability, gentle FV tiebreaker")
-        for i, r in enumerate(safety_sorted[:5]):
+        for i, r in enumerate(safety_sorted[:6]):
             tag = '🥇' if i == 0 else ('🥈' if i == 1 else '🥉' if i == 2 else '  ')
             pool_warn = ""
-            if r["remaining_pool"] <= 3:
-                pool_warn = f" ⚠️ leaves {r['remaining_pool']} {r['s16_day']} S16 options"
+            if r["remaining_this_day"] <= 2:
+                pool_warn = f" ⚠️ only {r['remaining_this_day']} {r['s16_day']} options left"
             st.markdown(f"""
             <div style="background:#0f2a1e; border-radius:8px; padding:10px 14px; margin:4px 0; border-left:3px solid #10b981;">
                 <div style="color:#6ee7b7; font-weight:700;">{tag} ({r['seed']}) {r['team']}</div>
@@ -854,7 +920,7 @@ def render_sunday_recommendations(entry_name, entry_data, contest_data):
                     FV: {r['fv']:.2f} · 
                     Field: ~{r['opp_pct']:.0%}<br/>
                     <span class="safety-tag">Safety: {r['safety']:.3f}</span>
-                    <span style="background:#1e293b;color:#94a3b8;padding:2px 6px;border-radius:4px;font-size:0.75em;margin-left:4px;">{r['s16_day']} S16 · {r['region']}</span>
+                    <span style="background:#1e293b;color:#94a3b8;padding:2px 6px;border-radius:4px;font-size:0.75em;margin-left:4px;">{r['s16_day']} · {r['region']}</span>
                     <span style="color:#6b7280;font-size:0.75em;">{pool_warn}</span>
                 </div>
             </div>
@@ -863,11 +929,11 @@ def render_sunday_recommendations(entry_name, entry_data, contest_data):
     with col2:
         st.markdown("#### ⚡ Leverage Picks")
         st.caption("Maximize edge over opponent field")
-        for i, r in enumerate(leverage_sorted[:5]):
+        for i, r in enumerate(leverage_sorted[:6]):
             tag = '🥇' if i == 0 else ('🥈' if i == 1 else '🥉' if i == 2 else '  ')
             pool_warn = ""
-            if r["remaining_pool"] <= 3:
-                pool_warn = f" ⚠️ leaves {r['remaining_pool']} {r['s16_day']} S16 options"
+            if r["remaining_this_day"] <= 2:
+                pool_warn = f" ⚠️ only {r['remaining_this_day']} {r['s16_day']} options left"
             st.markdown(f"""
             <div style="background:#1e1b4b; border-radius:8px; padding:10px 14px; margin:4px 0; border-left:3px solid #6366f1;">
                 <div style="color:#a5b4fc; font-weight:700;">{tag} ({r['seed']}) {r['team']}</div>
@@ -877,15 +943,13 @@ def render_sunday_recommendations(entry_name, entry_data, contest_data):
                     FV: {r['fv']:.2f} · 
                     Field: ~{r['opp_pct']:.0%}<br/>
                     <span class="leverage-tag">Leverage: {r['leverage']:.3f}</span>
-                    <span style="background:#1e293b;color:#94a3b8;padding:2px 6px;border-radius:4px;font-size:0.75em;margin-left:4px;">{r['s16_day']} S16 · {r['region']}</span>
+                    <span style="background:#1e293b;color:#94a3b8;padding:2px 6px;border-radius:4px;font-size:0.75em;margin-left:4px;">{r['s16_day']} · {r['region']}</span>
                     <span style="color:#6b7280;font-size:0.75em;">{pool_warn}</span>
                 </div>
             </div>
             """, unsafe_allow_html=True)
     
-    if not sunday_picks:
-        st.markdown("---")
-        st.caption("⚠️ Sunday opponent pick data not yet loaded. Field % uses seed-based estimates. Upload Sunday screenshot to refine.")
+    st.caption(f"Field % uses seed-based estimates until {CURRENT_ROUND} screenshot data is available.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -952,8 +1016,8 @@ def main():
     tab1, tab2, tab3, tab4 = st.tabs([
         "📋 My Entries",
         "📊 Opponent Picks",
-        "🎯 Sunday Picks",
-        "📅 Today's Games",
+        f"🎯 {CURRENT_ROUND}",
+        "📅 Bracket",
     ])
     
     # ─── Tab 1: My Entries ───────────────────────────────────────────────
@@ -997,10 +1061,10 @@ def main():
             st.markdown(f"### {day_choice} — {day_data['round']}")
             render_opponent_picks(day_choice, day_data, contest["total_entries"])
     
-    # ─── Tab 3: Sunday Recommendations ───────────────────────────────────
+    # ─── Tab 3: Next Round Recommendations ─────────────────────────────────
     with tab3:
-        st.markdown("## 🎯 Sunday Pick Strategy")
-        st.markdown("*Round of 32 · March 22, 2026*")
+        st.markdown(f"## 🎯 {CURRENT_ROUND} Pick Strategy")
+        st.markdown(f"*{CURRENT_ROUND_LABEL}*")
         
         if not entries:
             st.info(f"No entries configured for {contest_choice}.")
@@ -1012,7 +1076,7 @@ def main():
                 st.error(f"All entries eliminated in {contest_choice}.")
             else:
                 for entry_name, entry_data in alive_entries.items():
-                    render_sunday_recommendations(entry_name, entry_data, contest)
+                    render_next_round_recommendations(entry_name, entry_data, contest)
                     st.markdown("---")
             
             # Show eliminated entries
@@ -1022,56 +1086,67 @@ def main():
                         reason = entry_data.get("eliminated_by", "Unknown")
                         st.markdown(f"**{entry_name}** — {reason}")
     
-    # ─── Tab 4: Today's Games ────────────────────────────────────────────
+    # ─── Tab 4: Bracket ──────────────────────────────────────────────────
     with tab4:
-        st.markdown("## 📅 Sunday Games — Round of 32")
-        st.markdown("*March 22, 2026*")
+        st.markdown(f"## 🏆 {CURRENT_ROUND} Bracket")
+        st.markdown(f"*{CURRENT_ROUND_LABEL}*")
         
-        for g in SUNDAY_GAMES:
-            s1, s2 = g["seeds"]
-            t1, t2 = g["teams"]
+        for day_label, day_filter in [("Thursday March 26", "Thursday"), ("Friday March 27", "Friday")]:
+            st.markdown(f"### {day_label}")
+            day_games = [g for g in NEXT_ROUND_GAMES if g.get("day") == day_filter]
             
-            # Check if either team is used by our entries
-            used_by_entry = []
-            if contest_choice in MY_ENTRIES:
-                for ename, edata in MY_ENTRIES[contest_choice].items():
-                    for team in [t1, t2]:
-                        if team in edata.get("used_teams", []):
-                            used_by_entry.append(f"{team} used by {ename}")
-            
-            highlight = " · ".join(used_by_entry) if used_by_entry else ""
-            highlight_style = "border-left:3px solid #f59e0b;" if used_by_entry else "border-left:3px solid #2a3050;"
-            
-            st.markdown(f"""
-            <div style="background:#111827; border-radius:8px; padding:12px 16px; margin:6px 0; {highlight_style}">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <div>
-                        <span style="color:#e0e0e0; font-weight:700;">({s1}) {t1}</span>
-                        <span style="color:#6b7280;"> vs </span>
-                        <span style="color:#e0e0e0; font-weight:700;">({s2}) {t2}</span>
-                    </div>
-                    <span style="color:#9ca3af; font-size:0.9em;">{g['time']}</span>
-                </div>
-                {"<div style='color:#f59e0b; font-size:0.8em; margin-top:4px;'>⚠️ " + highlight + "</div>" if highlight else ""}
-            </div>
-            """, unsafe_allow_html=True)
-        
-        st.markdown("---")
-        st.markdown("### 🏆 Sweet 16 Qualifiers (so far)")
-        sweet16 = [
-            "Duke (1)", "Michigan State (3)", "Houston (2)", "Illinois (3)",
-            "Nebraska (4)", "Texas (11)", "Michigan (1)", "Arkansas (4)",
-        ]
-        cols = st.columns(4)
-        for i, team in enumerate(sweet16):
-            with cols[i % 4]:
+            for g in day_games:
+                s1, s2 = g["seeds"]
+                t1, t2 = g["teams"]
+                region = g.get("region", "")
+                
+                # Check if either team is used by our entries
+                used_by_entry = []
+                if contest_choice in MY_ENTRIES:
+                    for ename, edata in MY_ENTRIES[contest_choice].items():
+                        if not edata.get("alive"):
+                            continue
+                        for team in [t1, t2]:
+                            if team in edata.get("used_teams", []):
+                                used_by_entry.append(f"{team} used by {ename}")
+                
+                highlight = " · ".join(used_by_entry) if used_by_entry else ""
+                highlight_style = "border-left:3px solid #f59e0b;" if used_by_entry else "border-left:3px solid #2a3050;"
+                
                 st.markdown(f"""
-                <div style="background:#064e3b; border-radius:8px; padding:8px 12px; margin:3px 0; text-align:center;">
-                    <span style="color:#6ee7b7; font-weight:600;">{team}</span>
+                <div style="background:#111827; border-radius:8px; padding:12px 16px; margin:6px 0; {highlight_style}">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <span style="color:#e0e0e0; font-weight:700;">({s1}) {t1}</span>
+                            <span style="color:#6b7280;"> vs </span>
+                            <span style="color:#e0e0e0; font-weight:700;">({s2}) {t2}</span>
+                        </div>
+                        <span style="color:#9ca3af; font-size:0.9em;">{region} · {g['time']}</span>
+                    </div>
+                    {"<div style='color:#f59e0b; font-size:0.8em; margin-top:4px;'>⚠️ " + highlight + "</div>" if highlight else ""}
                 </div>
                 """, unsafe_allow_html=True)
         
-        st.caption("8 more spots TBD from today's games")
+        st.markdown("---")
+        st.markdown("### 🏆 Complete Sweet 16 Field")
+        sweet16 = [
+            ("South", [("(2) Houston", 2), ("(3) Illinois", 3), ("(4) Nebraska", 4), ("(9) Iowa", 9)]),
+            ("West", [("(1) Arizona", 1), ("(4) Arkansas", 4), ("(2) Purdue", 2), ("(11) Texas", 11)]),
+            ("East", [("(1) Duke", 1), ("(5) St. John's", 5), ("(3) Michigan St", 3), ("(2) UConn", 2)]),
+            ("Midwest", [("(1) Michigan", 1), ("(4) Alabama", 4), ("(2) Iowa State", 2), ("(6) Tennessee", 6)]),
+        ]
+        for region_name, teams in sweet16:
+            st.markdown(f"**{region_name}**")
+            cols = st.columns(4)
+            for i, (team_label, seed) in enumerate(teams):
+                with cols[i]:
+                    color = "#064e3b" if seed <= 3 else "#1e293b"
+                    text_color = "#6ee7b7" if seed <= 3 else "#94a3b8"
+                    st.markdown(f"""
+                    <div style="background:{color}; border-radius:8px; padding:8px 12px; margin:3px 0; text-align:center;">
+                        <span style="color:{text_color}; font-weight:600; font-size:0.9em;">{team_label}</span>
+                    </div>
+                    """, unsafe_allow_html=True)
 
 
 if __name__ == "__main__":
